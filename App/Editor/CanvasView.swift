@@ -28,6 +28,9 @@ final class CanvasView: NSView {
     init(model: EditorDocumentModel) {
         self.model = model
         super.init(frame: CGRect(origin: .zero, size: model.document.canvasSize))
+        // macOS 14 stopped clipping views to their bounds by default; anything drawn past the
+        // canvas edge would show over the scroll view's background (#118).
+        clipsToBounds = true
         registerForDraggedTypes([.fileURL, .png, .tiff])
     }
 
@@ -70,7 +73,7 @@ final class CanvasView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        drawCheckerboard(in: context)
+        drawCheckerboard(in: context, dirtyRect: dirtyRect)
         if let image = renderedImage() {
             context.saveGState()
             context.translateBy(x: 0, y: bounds.height)
@@ -96,23 +99,41 @@ final class CanvasView: NSView {
         return cachedRender
     }
 
-    private func drawCheckerboard(in context: CGContext) {
+    /// Drops cached renders when the window closes, so a closed editor holds no bitmaps (#111).
+    func releaseResources() {
+        cachedRender = nil
+        cachedRevision = -1
+    }
+
+    private func drawCheckerboard(in context: CGContext, dirtyRect: CGRect) {
         let tile = 8 / magnification
         context.setFillColor(NSColor.white.cgColor)
         context.fill(bounds)
         context.setFillColor(NSColor(white: 0.88, alpha: 1).cgColor)
-        guard tile > 0.5 else { return }
-        var y = 0.0
-        var row = 0
-        while y < bounds.height {
-            var x = (row % 2 == 0) ? 0 : tile
-            while x < bounds.width {
-                context.fill(CGRect(x: x, y: y, width: tile, height: tile))
-                x += tile * 2
+        context.fill(Self.checkerTiles(in: bounds, tile: tile, dirty: dirtyRect))
+    }
+
+    /// Dark checkerboard squares inside `bounds` (clipped to it, so none spill past the right
+    /// or bottom edge at fractional zoom, #118), limited to those touching `dirty`.
+    static func checkerTiles(in bounds: CGRect, tile: Double, dirty: CGRect) -> [CGRect] {
+        guard tile > 0.5, tile.isFinite else { return [] }
+        let area = bounds.intersection(dirty)
+        guard !area.isNull, !area.isEmpty else { return [] }
+        let firstRow = Int(((area.minY - bounds.minY) / tile).rounded(.down))
+        let firstColumn = Int(((area.minX - bounds.minX) / tile).rounded(.down))
+        var tiles: [CGRect] = []
+        var row = firstRow
+        while bounds.minY + Double(row) * tile < area.maxY {
+            var column = firstColumn + ((firstColumn + row) % 2 == 0 ? 0 : 1)
+            while bounds.minX + Double(column) * tile < area.maxX {
+                let rect = CGRect(x: bounds.minX + Double(column) * tile, y: bounds.minY + Double(row) * tile,
+                                  width: tile, height: tile).intersection(bounds)
+                if !rect.isEmpty { tiles.append(rect) }
+                column += 2
             }
-            y += tile
             row += 1
         }
+        return tiles
     }
 
     private func drawSelection(in context: CGContext) {

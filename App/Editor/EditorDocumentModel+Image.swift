@@ -64,9 +64,10 @@ extension EditorDocumentModel {
         if let result = ImageOps.flip(baseImage, horizontal: horizontal) { apply(result) }
     }
 
-    /// Resamples the base image to `size` pixels; annotations scale with it.
+    /// Resamples the base image to `size` pixels; annotations scale with it. Sizes outside
+    /// `ResizeLimits` are ignored (the dialog already refuses them).
     func resizeImage(to size: CGSize) {
-        guard size.width >= 1, size.height >= 1, size != snapshot.imageSize else { return }
+        guard let size = ResizeLimits.validate(size).size, size != snapshot.imageSize else { return }
         if let result = ImageOps.resize(baseImage, to: size) { apply(result) }
     }
 
