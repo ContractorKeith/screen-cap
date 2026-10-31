@@ -183,7 +183,16 @@ final class EditorDocumentModel {
 
     // MARK: - Saving
 
-    /// Writes a `.screencap` package that reopens with every object editable.
+    /// UserDefaults key: the user has confirmed, once, that saving bakes redactions.
+    static let redactionBakeConfirmedKey = "EditorRedactionBakeConfirmed"
+
+    /// True when this save would flatten blur or pixelate and the user hasn't confirmed it yet.
+    func needsRedactionBakeConfirmation(defaults: UserDefaults = .standard) -> Bool {
+        ProjectFile.containsRedactions(document) && !defaults.bool(forKey: Self.redactionBakeConfirmedKey)
+    }
+
+    /// Writes a `.screencap` package. Objects stay editable, except blur and pixelate (and anything
+    /// beneath them), which `ProjectFile` bakes into `base.png` so the original pixels aren't saved.
     func saveProject(to url: URL) throws {
         let canvas = document.canvasSize
         let previewScale = min(1, Double(ProjectFile.previewMaxPixels) / max(canvas.width, canvas.height, 1))

@@ -126,10 +126,18 @@ struct KindOptionsSection: View {
                 }
             }) {
                 Text("Secure").tag(Annotation.BlurMode.secure)
-                Text("Smooth").tag(Annotation.BlurMode.smooth)
+                Text("Smooth (not for secrets)").tag(Annotation.BlurMode.smooth)
             }
             .pickerStyle(.segmented)
-            LabeledSlider(title: "Blur radius", value: model.options.blurRadius, range: 2...60,
+            .help("Secure scrambles the pixels so text can't be read back. Smooth is a cosmetic blur: "
+                + "text under it can still be recovered, so don't use it on passwords or personal info.")
+            Text(model.options.blurMode == .secure
+                 ? "Secure: pixels are scrambled; text can't be read back."
+                 : "Smooth is cosmetic. Text under it can still be read. Use Secure for sensitive info.")
+                .font(.caption)
+                .foregroundStyle(model.options.blurMode == .secure ? Color.secondary : Color.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            LabeledSlider(title: "Blur radius", value: model.options.blurRadius, range: 4...60,
                           format: "%.0f", done: model.endGrouping) { value in
                 model.options.blurRadius = value
                 model.updateSelectedKinds(groupKey: "blur") { kind in
@@ -142,7 +150,7 @@ struct KindOptionsSection: View {
 
     private var pixelateOptions: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LabeledSlider(title: "Block size", value: Double(model.options.pixelateBlockSize), range: 4...64,
+            LabeledSlider(title: "Block size", value: Double(model.options.pixelateBlockSize), range: 8...64,
                           format: "%.0f px", done: model.endGrouping) { value in
                 let size = Int(value)
                 model.options.pixelateBlockSize = size
@@ -158,6 +166,14 @@ struct KindOptionsSection: View {
                     return .pixelate(rect: rect, blockSize: size, randomize: isOn)
                 }
             })
+            .help("Randomized blocks are secure: block size grows with the area and colors are scrambled. "
+                + "Plain pixelate keeps exact averages and can leak large text.")
+            if !model.options.pixelateRandomize {
+                Text("Without randomizing, large text can still be read. Turn it on for sensitive info.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

@@ -11,7 +11,7 @@ The reference implementation is `ProjectFile` and `Document` in
 ```
 Capture.screencap/
   document.json        the model (required)
-  base.png             the captured image, full resolution (required)
+  base.png             the captured image, full resolution, redactions baked in (required)
   preview.png          flattened render for Quick Look, longest edge ≤ 512 px (optional)
   layers/              only present if the document has image layers
     <name>.png         one per image layer or custom background image
@@ -23,6 +23,28 @@ Capture.screencap/
   `customImage` background fills. Readers must fail if a referenced layer is missing.
 - Writers build the package in a temporary directory on the same volume and swap it into place,
   so a failed save never leaves a half-written package.
+
+## Redactions are baked on save
+
+Blur and pixelate exist to hide something, so a package must never carry the pixels they
+cover. When a document has any `blur` or `pixelate` annotation, ScreenCap's writer
+(`ProjectFile.bakingRedactions`) flattens it into `base.png` before writing:
+
+- Every `blur` and `pixelate` is rendered into `base.png` and removed from `annotations`.
+- So is every annotation drawn beneath one of them whose painted area overlaps it, directly
+  or through another baked annotation (a text box, an arrow, an image layer under a blur).
+  Their data (text strings, `layers/*.png`) is not written. Layers no longer referenced are
+  dropped.
+- Annotations drawn above the redactions are written normally and stay editable.
+
+**Trade-off:** after the project is reopened, baked redactions can't be moved, resized or
+removed, because the original pixels are gone. The open editor keeps them editable until the
+window closes, and each save bakes again from that state. Baked objects are clipped to the base
+image (anything over background padding is lost). The editor shows a one-time confirmation
+before the first save that bakes. Spotlight is not a redaction and is not baked.
+
+So `base.png` is "the captured image, with redactions applied," and `preview.png` shows the
+same thing.
 
 ## Conventions
 
@@ -100,6 +122,8 @@ Kinds (fields of each case):
 ## Example
 
 A Retina capture with a gradient background, a curved arrow, a counter and a secure blur.
+(ScreenCap itself bakes the blur into `base.png` on save; other writers may emit it, and
+readers must still accept it.)
 
 ```json
 {

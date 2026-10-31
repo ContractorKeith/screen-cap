@@ -1,23 +1,40 @@
 // Destructive redaction (PLAN §5.6): pixelate and blur replace pixels in a new image.
-// Secure modes add seeded per-block noise so averaging or deconvolution can't recover text.
+// Secure modes add seeded per-block noise so averaging or deconvolution can't recover text,
+// and never use blocks smaller than a fixed share of the rect, so large text can't survive.
 import CoreGraphics
 import CoreImage
 import Foundation
 
 public enum Redaction {
     public enum BlurMode: Sendable {
-        /// Plain Gaussian blur. Looks nice, but is not safe for secrets.
+        /// Plain Gaussian blur. Cosmetic only: OCR can read text through it.
         case smooth
-        /// Randomized pixelate first, then Gaussian blur. Irreversible.
+        /// Two passes of randomized pixelate at a secure block size, then Gaussian blur.
         case secure
     }
 
     /// Max per-channel color jitter (0...255) added to each block when randomizing.
     static let colorJitter = 32
+    /// Secure blocks are at least this share of the rect's shorter side. A user draws the rect
+    /// around the text, so text height is bounded by it; blocks this big leave about two per glyph.
+    static let secureBlockFraction = 0.4
+    /// Absolute floor for secure blocks, in output pixels.
+    static let minimumSecureBlock = 8
+
+    /// The block size secure modes use for `rect` (top-left image pixels): `requested`, raised to
+    /// the absolute floor and to `secureBlockFraction` of the clipped rect's shorter side.
+    public static func secureBlockSize(requested: Int, rect: CGRect, imageSize: CGSize) -> Int {
+        let clipped = rect.integral.intersection(CGRect(origin: .zero, size: imageSize))
+        guard !clipped.isNull, !clipped.isEmpty else { return max(requested, minimumSecureBlock) }
+        let shortSide = Double(min(clipped.width, clipped.height))
+        let relative = Int((shortSide * secureBlockFraction).rounded(.up))
+        return max(requested, minimumSecureBlock, relative)
+    }
 
     /// Replaces `rect` (top-left image pixels) with averaged blocks of `blockSize` pixels.
-    /// With `randomize`, the grid phase, each block's sampling window and each block's color are
-    /// jittered from `seed`, so the output no longer carries an exact average of the source.
+    /// With `randomize` (the secure mode), the block size is raised to `secureBlockSize`, and two
+    /// passes on offset grids run; each pass jitters the grid phase, each block's sampling window
+    /// and each block's color from `seed`, so the output carries no exact average of the source.
     public static func pixelate(
         _ image: CGImage,
         rect: CGRect,
@@ -28,7 +45,21 @@ public enum Redaction {
         let bitmap = try EffectsBitmap(image: image)
         guard let region = clip(rect, to: bitmap) else { return image }
         var rng = EffectsRandom(seed: seed)
-        let block = max(1, blockSize)
+        guard randomize else {
+            pixelatePass(region, block: max(1, blockSize), randomize: false, in: bitmap, rng: &rng)
+            return try bitmap.makeImage()
+        }
+        let size = CGSize(width: bitmap.width, height: bitmap.height)
+        let block = secureBlockSize(requested: blockSize, rect: rect, imageSize: size)
+        pixelatePass(region, block: block, randomize: true, in: bitmap, rng: &rng)
+        pixelatePass(region, block: block, randomize: true, in: bitmap, rng: &rng)
+        return try bitmap.makeImage()
+    }
+
+    /// One pixelate pass over `region`, in place.
+    private static func pixelatePass(
+        _ region: PixelRect, block: Int, randomize: Bool, in bitmap: EffectsBitmap, rng: inout EffectsRandom
+    ) {
         let phaseX = randomize ? rng.int(in: 0...(block - 1)) : 0
         let phaseY = randomize ? rng.int(in: 0...(block - 1)) : 0
 
@@ -52,7 +83,6 @@ public enum Redaction {
             }
             blockY += block
         }
-        return try bitmap.makeImage()
     }
 
     /// Blurs `rect` (top-left image pixels). The blur samples only pixels inside `rect`.
@@ -63,12 +93,12 @@ public enum Redaction {
         mode: BlurMode,
         seed: UInt64 = UInt64.random(in: 0...UInt64.max)
     ) throws -> CGImage {
-        var source = image
-        if mode == .secure {
-            let block = max(8, Int(radius.rounded()))
-            source = try pixelate(image, rect: rect, blockSize: block, randomize: true, seed: seed)
-        }
-        return try gaussianBlur(source, rect: rect, radius: radius)
+        guard mode == .secure else { return try gaussianBlur(image, rect: rect, radius: radius) }
+        let size = CGSize(width: image.width, height: image.height)
+        let block = secureBlockSize(requested: Int(radius.rounded()), rect: rect, imageSize: size)
+        let pixelated = try pixelate(image, rect: rect, blockSize: block, randomize: true, seed: seed)
+        // Soften the block edges so it reads as a blur; the blocks already hold no glyph detail.
+        return try gaussianBlur(pixelated, rect: rect, radius: max(radius, CGFloat(block) / 4))
     }
 
     // MARK: - Helpers

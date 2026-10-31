@@ -38,17 +38,30 @@ public enum ProjectFile {
 
     /// Writes the package atomically: everything goes into a temporary directory on the same
     /// volume, which then replaces (or becomes) `url`. A failed write leaves `url` untouched.
-    /// - Parameter preview: Flattened render for Quick Look. When nil, a downscaled base image is used.
+    /// - Parameters:
+    ///   - preview: Flattened render for Quick Look. When nil, a downscaled base image is used.
+    ///   - bakeRedactions: Flatten blur and pixelate into `base.png` first (see `bakingRedactions`),
+    ///     so the package never holds the pixels they hide. On by default; only tests turn it off.
     public static func write(
         _ document: Document,
         baseImage: CGImage,
         layers: [String: CGImage] = [:],
         preview: CGImage? = nil,
+        bakeRedactions: Bool = true,
         to url: URL
     ) throws {
         for name in layers.keys where !isValidLayerName(name) { throw ProjectFileError.invalidLayerName(name) }
         for name in document.referencedLayerNames where layers[name] == nil {
             throw ProjectFileError.missingLayer(name)
+        }
+        var document = document
+        var baseImage = baseImage
+        var layers = layers
+        if bakeRedactions {
+            let baked = try bakingRedactions(document, baseImage: baseImage, layers: layers)
+            document = baked.document
+            baseImage = baked.baseImage
+            layers = baked.layers
         }
 
         let fileManager = FileManager.default
@@ -108,6 +121,55 @@ public enum ProjectFile {
         return ProjectContents(document: document, baseImage: base, layers: layers, preview: preview)
     }
 
+    // MARK: - Redaction baking
+
+    /// True if `document` has a blur or pixelate that saving will bake into `base.png`.
+    public static func containsRedactions(_ document: Document) -> Bool {
+        document.annotations.contains(where: \.isBakedRedaction)
+    }
+
+    /// Flattens every blur and pixelate into the base image, together with any object drawn
+    /// beneath one and overlapping it (directly or through another baked object), so neither
+    /// the hidden pixels nor a hidden object's data survive in the package. Objects above the
+    /// redactions stay editable. Layers no longer referenced are dropped.
+    ///
+    /// Trade-off: baked objects can't be moved or removed after the project is reopened, and
+    /// parts of them outside the base image (over background padding) are clipped.
+    public static func bakingRedactions(
+        _ document: Document,
+        baseImage: CGImage,
+        layers: [String: CGImage],
+        renderer: Renderer = Renderer()
+    ) throws -> ProjectContents {
+        guard containsRedactions(document) else {
+            return ProjectContents(document: document, baseImage: baseImage, layers: layers, preview: nil)
+        }
+
+        // Walk top to bottom, growing the covered region from each redaction downward.
+        var covered: [CGRect] = []
+        var baked = Set<UUID>()
+        for annotation in document.drawOrder.reversed() {
+            let reach = annotation.paintedBounds
+            if annotation.isBakedRedaction || covered.contains(where: { $0.intersects(reach) }) {
+                baked.insert(annotation.id)
+                covered.append(reach)
+            }
+        }
+
+        var flattened = document
+        flattened.background = nil
+        flattened.canvasSize = document.baseImage.pixelSize
+        flattened.annotations = document.annotations.filter { baked.contains($0.id) }
+        let image = try renderer.image(for: flattened, baseImage: baseImage, layers: layers,
+                                       options: RenderOptions(scale: 1, includeBackground: false))
+
+        var remaining = document
+        remaining.annotations.removeAll { baked.contains($0.id) }
+        let names = remaining.referencedLayerNames
+        return ProjectContents(document: remaining, baseImage: image, layers: layers.filter { names.contains($0.key) },
+                               preview: nil)
+    }
+
     /// Decodes `document.json`, rejecting schema versions newer than `Document.currentSchemaVersion`.
     public static func decodeDocument(_ data: Data) throws -> Document {
         try JSONDecoder().decode(Document.self, from: data)
@@ -154,5 +216,25 @@ public enum ProjectFile {
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         guard let scaled = context.makeImage() else { throw ProjectFileError.imageEncodingFailed(previewFileName) }
         return scaled
+    }
+}
+
+private extension Annotation {
+    var isBakedRedaction: Bool {
+        switch kind {
+        case .blur, .pixelate: true
+        default: false
+        }
+    }
+
+    /// Geometry bounds grown by stroke and shadow, roughly what the object paints.
+    var paintedBounds: CGRect {
+        let bounds = kind.bounds
+        guard !bounds.isNull else { return bounds }
+        var grow = style.strokeWidth + 2
+        if let shadow = style.shadow {
+            grow += shadow.radius * 2 + max(abs(shadow.offset.width), abs(shadow.offset.height))
+        }
+        return bounds.insetBy(dx: -grow, dy: -grow)
     }
 }
