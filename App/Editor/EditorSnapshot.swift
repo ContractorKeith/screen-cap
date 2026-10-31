@@ -195,6 +195,7 @@ enum ImageOps {
     }
 
     static func resize(_ image: CGImage, to size: CGSize) -> Result? {
+        guard ResizeLimits.validate(size).size != nil else { return nil }
         let width = max(1, size.width.rounded()), height = max(1, size.height.rounded())
         let scaleX = width / Double(image.width), scaleY = height / Double(image.height)
         guard let resized = draw(image, size: CGSize(width: width, height: height),

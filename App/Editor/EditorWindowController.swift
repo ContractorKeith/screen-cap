@@ -25,6 +25,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     let scrollView: NSScrollView
     /// Called when the window closes, so the coordinator can release it.
     var onClose: ((EditorWindowController) -> Void)?
+    private var isTornDown = false
 
     init(model: EditorDocumentModel, settings: AppSettings, preferences: EditorPreferences) {
         self.model = model
@@ -147,11 +148,27 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     func forceClose() {
         window?.delegate = nil
         window?.close()
-        onClose?(self)
+        tearDown()
     }
 
     func windowWillClose(_ notification: Notification) {
+        tearDown()
+    }
+
+    /// Releases a closed window (#111). The hosting view's `EditorView` holds this controller
+    /// strongly and the controller owns the window, so the content view must go to break the
+    /// cycle; the model's callback, canvas caches and pending text detection go with it.
+    private func tearDown() {
+        guard !isTornDown else { return }
+        isTornDown = true
+        model.onChange = nil
+        model.textDetection?.cancel()
+        canvas.releaseResources()
+        scrollView.documentView = nil
+        window?.contentView = nil
+        window?.delegate = nil
         onClose?(self)
+        onClose = nil
     }
 }
 
