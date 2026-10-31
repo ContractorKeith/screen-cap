@@ -19,48 +19,85 @@ final class SettingsNavigation {
     }
 }
 
-/// Settings tabs (PLAN §3.4). A new tab needs an `AutomationCommand.SettingsTab` case (its URL
-/// spelling for `screencap://open-settings?tab=`) and a `.tabItem` plus `.tag` here.
+/// Settings panes (PLAN §3.4) as a sidebar list beside the selected pane: ten tabs don't fit a
+/// tab row without truncating their titles (#104). A new pane needs an `AutomationCommand.SettingsTab`
+/// case (its URL spelling for `screencap://open-settings?tab=`), a `title`/`symbol` and a `pane` case.
 struct SettingsView: View {
     let settings: AppSettings
     let history: HistoryStore?
     let updater: UpdaterController
     @Bindable var navigation: SettingsNavigation
 
+    static let sidebarWidth: CGFloat = 180
+    static let paneSize = CGSize(width: 660, height: 580)
+
     var body: some View {
-        TabView(selection: $navigation.tab) {
-            GeneralSettingsPane(settings: settings)
-                .tabItem { Label("General", systemImage: "gearshape") }
-                .tag(AutomationCommand.SettingsTab.general)
-            ShortcutsSettingsPane()
-                .tabItem { Label("Shortcuts", systemImage: "keyboard") }
-                .tag(AutomationCommand.SettingsTab.shortcuts)
-            QuickAccessSettingsPane(settings: settings)
-                .tabItem { Label("Quick Access", systemImage: "rectangle.stack") }
-                .tag(AutomationCommand.SettingsTab.quickAccess)
-            ScreenshotsSettingsPane(settings: settings)
-                .tabItem { Label("Screenshots", systemImage: "camera.viewfinder") }
-                .tag(AutomationCommand.SettingsTab.screenshots)
-            ScrollingSettingsPane(settings: .shared)
-                .tabItem { Label("Scrolling", systemImage: "scroll") }
-                .tag(AutomationCommand.SettingsTab.scrolling)
-            TextRecognitionSettingsPane(settings: settings)
-                .tabItem { Label("Text Recognition", systemImage: "text.viewfinder") }
-                .tag(AutomationCommand.SettingsTab.text)
-            AnnotateSettingsPane(settings: settings)
-                .tabItem { Label("Annotate", systemImage: "pencil.and.outline") }
-                .tag(AutomationCommand.SettingsTab.annotate)
-            WallpaperSettingsPane(settings: settings)
-                .tabItem { Label("Wallpaper", systemImage: "photo.on.rectangle") }
-                .tag(AutomationCommand.SettingsTab.wallpaper)
-            AdvancedSettingsPane(settings: settings, history: history, updater: updater)
-                .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
-                .tag(AutomationCommand.SettingsTab.advanced)
-            AboutSettingsPane()
-                .tabItem { Label("About", systemImage: "info.circle") }
-                .tag(AutomationCommand.SettingsTab.about)
+        HStack(spacing: 0) {
+            List(AutomationCommand.SettingsTab.allCases, id: \.self, selection: selection) { tab in
+                Label(tab.title, systemImage: tab.symbol)
+            }
+            .listStyle(.sidebar)
+            .frame(width: Self.sidebarWidth)
+            Divider()
+            pane(navigation.tab)
+                .frame(width: Self.paneSize.width, height: Self.paneSize.height)
         }
-        .frame(width: 680, height: 580)
+        .frame(height: Self.paneSize.height)
+    }
+
+    /// List selection is optional; clicking empty sidebar space mustn't clear the tab.
+    private var selection: Binding<AutomationCommand.SettingsTab?> {
+        Binding(get: { navigation.tab }, set: { if let tab = $0 { navigation.tab = tab } })
+    }
+
+    @ViewBuilder
+    private func pane(_ tab: AutomationCommand.SettingsTab) -> some View {
+        switch tab {
+        case .general: GeneralSettingsPane(settings: settings)
+        case .shortcuts: ShortcutsSettingsPane()
+        case .quickAccess: QuickAccessSettingsPane(settings: settings)
+        case .screenshots: ScreenshotsSettingsPane(settings: settings)
+        case .scrolling: ScrollingSettingsPane(settings: .shared)
+        case .text: TextRecognitionSettingsPane(settings: settings)
+        case .annotate: AnnotateSettingsPane(settings: settings)
+        case .wallpaper: WallpaperSettingsPane(settings: settings)
+        case .advanced: AdvancedSettingsPane(settings: settings, history: history, updater: updater)
+        case .about: AboutSettingsPane()
+        }
+    }
+}
+
+extension AutomationCommand.SettingsTab {
+    /// Sidebar title.
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .shortcuts: "Shortcuts"
+        case .quickAccess: "Quick Access"
+        case .screenshots: "Screenshots"
+        case .scrolling: "Scrolling"
+        case .text: "Text Recognition"
+        case .annotate: "Annotate"
+        case .wallpaper: "Wallpaper"
+        case .advanced: "Advanced"
+        case .about: "About"
+        }
+    }
+
+    /// SF Symbol shown beside the title.
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .shortcuts: "keyboard"
+        case .quickAccess: "rectangle.stack"
+        case .screenshots: "camera.viewfinder"
+        case .scrolling: "scroll"
+        case .text: "text.viewfinder"
+        case .annotate: "pencil.and.outline"
+        case .wallpaper: "photo.on.rectangle"
+        case .advanced: "slider.horizontal.3"
+        case .about: "info.circle"
+        }
     }
 }
 

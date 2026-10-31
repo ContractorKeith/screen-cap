@@ -2,6 +2,58 @@
 
 All notable changes to ScreenCap. Versions follow [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+Fixes from the post-release QA passes.
+
+### Added
+- Wallpaper → "Add background to window captures" puts window captures on the wallpaper
+  background, centered with even shadow margins (#95, #107).
+- Opening a `.screencap` project or an image from Finder or `open -a` opens it in the editor (#96).
+- Quitting with unsaved editor work asks to save each window first (#84, #106).
+- Lowering "Keep captures for" asks before deleting older captures (#107).
+
+### Capture
+- `--quit` exits with a code that says what happened, and failed captures, saves and copies
+  show a HUD instead of failing silently (#68, #83).
+- Saves in the same second no longer overwrite each other; long names are trimmed safely (#67, #68).
+- Areas that span displays capture correctly; self-timer always lets you pick the area (#68).
+- Fixed sizes reject `inf`, `nan` and absurd values; the magnifier shows live pixels when the
+  screen isn't frozen (#94).
+- Capture Text writes its History record again (#83).
+
+### Scrolling capture
+- Fast scrolls and repeating content (logs, tables, Terminal) stitch correctly; real gaps are
+  marked with a seam and a HUD instead of duplicated rows (#69, #93, #108).
+- Auto-scroll keeps the top of the region and no longer stops early on repetitive pages (#108).
+- `--region` rejects `nan`, `inf`, hex and exponents (#105).
+
+### Quick Access and History
+- Restore to Quick Access works, and OCR text reaches History (#66).
+- History expiry applies while the app runs, not just at launch (#95).
+- Drag-out uses the same output scale as Save; a cancelled swipe no longer moves the panel (#95).
+- Panels still on screen at quit come back with Restore Recently Closed (#107).
+- Delete reports a file that couldn't be moved to the Trash (#105).
+
+### Annotate
+- Redactions defeat OCR, Smooth blur is labeled as not for secrets, and saved projects bake
+  redactions so the original pixels aren't kept (#65).
+- Opaque shapes over text can be used as redactions and are baked the same way (#84, #106).
+- Auto Balance survives later edits; resize keeps the image scale; counter handles resize;
+  undo memory is capped (#64).
+- A file that can't be opened shows a HUD instead of a modal that could hide behind other windows (#105).
+
+### URL scheme and settings
+- `open-settings` knows every tab; `scrolling-capture` and `capture-text` handle all their
+  parameters and queue behind a running capture (#67, #83, #107).
+- Region numbers must be plain decimals (#107).
+- Reset All Settings resets every setting (#67).
+- Settings uses a sidebar so every pane title shows in full (#104).
+
+### Build
+- Every build gets a real build number, and CI checks the bundle (#82).
+- The app ships its dependencies' resource bundles, so the Shortcuts pane works on any Mac (#96).
+
 ## 0.1.0 — 2026-10-31
 
 First release. Ad-hoc signed, not yet notarized.

@@ -202,9 +202,21 @@ struct ScrollingLaunchOptionsTests {
         #expect(options.autoScroll == true)
     }
 
-    @Test(arguments: ["1,2,3", "a,b,c,d", "0,0,0,10", "0,0,10,-1"])
+    @Test(arguments: ["1,2,3", "a,b,c,d", "0,0,0,10", "0,0,10,-1", "1,2,3,4,5", "1,,3,4",
+                      "nan,0,100,100", "0,0,inf,100", "0,0,100,-inf", "1e309,0,10,10", "0,0,0x10,10",
+                      "+1,0,10,10", "--1,0,10,10", "0,0,10,10e0"])
     func rejectsBadRects(text: String) {
         #expect(ScrollingLaunchOptions.parseRect(text) == nil)
+    }
+
+    @Test func acceptsNegativeOrigin() {
+        #expect(ScrollingLaunchOptions.parseRect("-1440, -200.5,300,400") == CGRect(x: -1440, y: -200.5,
+                                                                                    width: 300, height: 400))
+    }
+
+    @Test func nonFiniteRegionLeavesOptionUnset() {
+        let options = ScrollingLaunchOptions.parse(["ScreenCap", "--capture", "scrolling", "--region", "nan,0,100,100"])
+        #expect(options.region == nil)
     }
 
     @Test func absentOptionsAreNil() {
