@@ -14,7 +14,8 @@ final class CaptureCoordinator {
     let service: CaptureService
     let previousArea: PreviousArea
     let selfTimer = SelfTimer()
-    private let history: HistoryStore?
+    /// Shared with features that update records (Quick Access close/restore/delete).
+    let history: HistoryStore?
     private let hasPermission: () -> Bool
     private let showOnboarding: () -> Void
     private var current: Task<Void, Never>?
