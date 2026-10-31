@@ -55,7 +55,8 @@ struct VisionRecognitionTests {
                 return "Hello, \\(name)! [\\(count)]"
             }
             """,
-            font: "Menlo", size: 16, languages: nil, ignoresWhitespace: false, minimumAccuracy: 0.98,
+            // Vision's model differs per macOS release: 99% on macOS 26, 94% on the macOS 15 CI runner.
+            font: "Menlo", size: 16, languages: nil, ignoresWhitespace: false, minimumAccuracy: 0.92,
             // Code isn't prose: dictionary correction rewrites identifiers and punctuation.
             usesLanguageCorrection: false
         )
