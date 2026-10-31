@@ -34,16 +34,9 @@ final class QuickAccessController: CaptureSink {
         }
     }
 
+    /// Always shows the panel. "Show after capture" off is handled upstream: the coordinator turns
+    /// `.overlay` into `.save`, which surfaces its own failures (#75, #105).
     func deliver(_ result: CaptureResult, action: AfterCaptureAction) async {
-        guard QuickAccessPreferences.showAfterCapture else {
-            do {
-                let url = try await output.save(result)
-                appLog.notice("Quick Access off; saved \(url.path, privacy: .public)")
-            } catch {
-                appLog.error("Save failed: \(error.localizedDescription, privacy: .public)")
-            }
-            return
-        }
         show(result)
     }
 

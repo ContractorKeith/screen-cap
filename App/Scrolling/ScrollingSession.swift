@@ -188,9 +188,11 @@ struct ScrollingLaunchOptions: Equatable {
         return result
     }
 
-    /// "x,y,w,h" with a positive size.
+    /// "x,y,w,h" with a positive size. Plain decimals only (x and y may be negative), so `nan`,
+    /// `inf`, `1e309` and hex are rejected like the URL scheme's regions (#105).
     static func parseRect(_ text: String) -> CGRect? {
-        let parts = text.split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
+        let parts = text.split(separator: ",", omittingEmptySubsequences: false)
+            .map { StrictNumber.signedDecimal($0.trimmingCharacters(in: .whitespaces)) }
         guard parts.count == 4, let x = parts[0], let y = parts[1], let width = parts[2], let height = parts[3],
               width > 0, height > 0 else { return nil }
         return CGRect(x: x, y: y, width: width, height: height)

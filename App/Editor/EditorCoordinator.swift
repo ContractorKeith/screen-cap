@@ -44,7 +44,10 @@ final class EditorCoordinator: CaptureSink {
         do {
             show(try EditorDocumentModel.open(url))
         } catch {
-            NSAlert(error: error).runModal()
+            // A HUD, not an app-modal alert: from Finder or `open -a` the menu-bar app isn't active,
+            // so a modal could open hidden behind other windows and block the run loop (#105).
+            appLog.error("Couldn't open \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            HUDPanel.show(error.localizedDescription, duration: .seconds(4))
         }
     }
 

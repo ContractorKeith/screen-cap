@@ -105,15 +105,20 @@ extension QuickAccessController {
     }
 
     /// Removes the record from history and moves a file saved from this panel to the Trash.
+    /// Either failing shows why in a HUD (#105); the panel is already gone by then.
     private func delete(_ item: QuickAccessItem) async {
         remove(item, markClosed: false)
-        if let id = item.result.historyRecordID, let history {
-            _ = try? await history.delete(id: id)
+        let deleteRecord: (() async throws -> Void)? = item.result.historyRecordID.flatMap { id in
+            history.map { history in { _ = try await history.delete(id: id) } }
         }
         // A save still running lands after the panel is gone; wait for it so its file is trashed too.
         let pending = await saveGate.pending(saveKey(item))
-        if let url = item.savedURL ?? pending {
-            try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        let message = await QuickAccessDeletion.run(deleteRecord: deleteRecord, fileURL: item.savedURL ?? pending) {
+            try FileManager.default.trashItem(at: $0, resultingItemURL: nil)
+        }
+        if let message {
+            appLog.error("Delete failed: \(message, privacy: .public)")
+            HUDPanel.show(message, duration: .seconds(4))
         }
     }
 
