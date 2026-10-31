@@ -86,7 +86,11 @@ public enum Redaction {
             .clampedToExtent()
             .applyingGaussianBlur(sigma: Double(radius))
             .cropped(to: region)
-        let context = CIContext(options: [.workingColorSpace: EffectsBitmap.colorSpace])
+        // Software renderer: the GPU path hangs on headless VMs (CI) and a small rect is cheap on CPU.
+        let context = CIContext(options: [
+            .workingColorSpace: EffectsBitmap.colorSpace,
+            .useSoftwareRenderer: true
+        ])
         guard let rendered = context.createCGImage(blurred, from: region) else {
             throw EffectsError.imageCreationFailed
         }
