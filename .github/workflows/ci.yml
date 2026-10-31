@@ -42,3 +42,9 @@ jobs:
           perl -e 'alarm 60; exec @ARGV' build/ScreenCap.app/Contents/MacOS/ScreenCap --capture bogus --quit || status=$?
           echo "exit status $status"
           [ "$status" -eq 3 ]
+          # A bad --region with --quit is a usage error too, never the interactive overlay (#119, #135).
+          status=0
+          perl -e 'alarm 60; exec @ARGV' build/ScreenCap.app/Contents/MacOS/ScreenCap \
+            --capture scrolling --region nan,0,100,100 --quit || status=$?
+          echo "exit status $status"
+          [ "$status" -eq 3 ]

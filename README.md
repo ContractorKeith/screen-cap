@@ -53,19 +53,28 @@ Requires macOS 14 Sonoma or newer.
 
 **Download.** Get `ScreenCap-<version>.dmg` from
 [Releases](https://github.com/ContractorKeith/screen-cap/releases), open it, and drag
-ScreenCap to Applications. Builds are not notarized yet, so the first time, right-click
-ScreenCap.app → **Open** → **Open**. After that it opens normally.
+ScreenCap to Applications.
 
-**Homebrew.**
+**First launch.** Builds are ad-hoc signed and not notarized yet, so macOS blocks the first open:
+
+- **macOS 15 and later:** open ScreenCap once and click **Done** on the "Not Opened" dialog.
+  Then go to **System Settings → Privacy & Security**, scroll to "ScreenCap was blocked…",
+  click **Open Anyway**, authenticate, and open ScreenCap again. Or, in Terminal:
+  `xattr -dr com.apple.quarantine /Applications/ScreenCap.app`
+- **macOS 14:** right-click ScreenCap.app → **Open** → **Open**.
+
+After that it opens normally. Each new version you download needs this once more.
+
+**Homebrew** (after the first tagged release; the cask isn't published yet).
 
 ```bash
 brew tap ContractorKeith/tap
 brew install --cask screen-cap
 ```
 
-The cask lives in [ContractorKeith/homebrew-tap](https://github.com/ContractorKeith/homebrew-tap);
-the source copy is [Casks/screen-cap.rb](Casks/screen-cap.rb). Since the app isn't
-notarized, macOS may still ask you to right-click → Open on first launch.
+The cask will live in [ContractorKeith/homebrew-tap](https://github.com/ContractorKeith/homebrew-tap);
+the source copy is [Casks/screen-cap.rb](Casks/screen-cap.rb). Homebrew quarantines the app
+too, so the first-launch steps above apply.
 
 Updates: **Check for Updates…** in the menu. Until signed update feeds are set up it opens
 the Releases page.
