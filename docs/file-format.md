@@ -67,6 +67,7 @@ the version; anything an older reader would misread bumps it.
 | `cornerRadius` | number | applied to the base image |
 | `shadow` | shadow? | under the base image |
 | `alignment` | string | `center`, `top`, `bottom`, `left`, `right`, `topLeft`, `topRight`, `bottomLeft`, `bottomRight` |
+| `edgePadding` | object? | `{top, left, bottom, right}` canvas padding set by Auto Balance; absent means `padding` on every edge |
 
 A shadow is `{"color": color, "radius": number, "offset": size}`.
 

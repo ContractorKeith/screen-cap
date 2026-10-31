@@ -36,22 +36,44 @@ struct EditorSnapshot: @unchecked Sendable {
     }
 
     /// Replaces the base image, maps every annotation through `transform`, and refits the canvas.
+    /// `scale` is the resample factor (1 for crop, rotate and flip). It carries over to the
+    /// pixels-per-point scale, so a 2x image resized to half width exports at 72 dpi and opens
+    /// at the same point size; it never drops below 1x, matching how `ImageOps.load` reads DPI.
     mutating func replaceBase(with image: CGImage, scale: Double = 1, mapping transform: (CGPoint) -> CGPoint) {
         baseImage = image
         document.baseImage.pixelWidth = image.width
         document.baseImage.pixelHeight = image.height
+        document.baseImage.scale = max(1, document.baseImage.scale * scale)
         for index in document.annotations.indices {
-            var annotation = document.annotations[index]
-            annotation.kind = annotation.kind.mapped(scale: scale, transform)
-            if case let .text(string, preset, fontSize, rect) = annotation.kind {
-                annotation.kind = .text(string: string, preset: preset, fontSize: fontSize * scale, rect: rect)
-            }
-            document.annotations[index] = annotation
+            document.annotations[index] = Self.scaled(document.annotations[index], by: scale, mapping: transform)
         }
         refitCanvas()
     }
 
-    /// Recomputes `canvasSize` from the base image, background padding and aspect ratio.
+    /// Maps an annotation's points and scales its pixel sizes (stroke, font, blur radius,
+    /// pixelate block) so it looks the same relative to a resampled image.
+    private static func scaled(_ annotation: Annotation, by scale: Double,
+                               mapping transform: (CGPoint) -> CGPoint) -> Annotation {
+        var annotation = annotation
+        annotation.kind = annotation.kind.mapped(scale: scale, transform)
+        guard scale != 1 else { return annotation }
+        annotation.style.strokeWidth *= scale
+        switch annotation.kind {
+        case let .text(string, preset, fontSize, rect):
+            annotation.kind = .text(string: string, preset: preset, fontSize: fontSize * scale, rect: rect)
+        case let .blur(rect, mode, radius):
+            annotation.kind = .blur(rect: rect, mode: mode, radius: radius * scale)
+        case let .pixelate(rect, blockSize, randomize):
+            let size = max(1, Int((Double(blockSize) * scale).rounded()))
+            annotation.kind = .pixelate(rect: rect, blockSize: size, randomize: randomize)
+        default:
+            break
+        }
+        return annotation
+    }
+
+    /// Recomputes `canvasSize` from the base image, background padding (per-edge after Auto
+    /// Balance) and aspect ratio.
     mutating func refitCanvas() {
         document.canvasSize = BackgroundMath.canvasSize(
             imageSize: imageSize, background: document.background, aspect: backgroundAspect
@@ -61,12 +83,13 @@ struct EditorSnapshot: @unchecked Sendable {
 
 /// Canvas sizing and Auto Balance mapping for the Background tool (PLAN §3.3, §5.5).
 enum BackgroundMath {
-    /// Canvas for `background` around an image: padding on every side, then grown (never
-    /// cropped) to `aspect` through the same layout the compositor uses.
+    /// Canvas for `background` around an image: its resolved padding on each edge, then grown
+    /// (never cropped) to `aspect` through the same layout the compositor uses.
     static func canvasSize(imageSize: CGSize, background: Document.Background?, aspect: Double?) -> CGSize {
         guard let background else { return imageSize }
         return BackgroundCompositor.layout(
-            imageSize: imageSize, background: background, aspectRatio: aspect.map { CGFloat($0) }
+            imageSize: imageSize, background: background, padding: background.resolvedPadding,
+            aspectRatio: aspect.map { CGFloat($0) }
         ).canvas
     }
 
@@ -90,9 +113,11 @@ enum BackgroundMath {
         return CGRect(origin: CGPoint(x: x, y: y), size: size)
     }
 
-    /// Fits Auto Balance's per-edge insets to the model's uniform padding plus alignment, for a
-    /// canvas of image + insets. Exact when only one axis is unbalanced (the usual window shadow).
-    static func balanced(_ insets: EffectsInsets) -> (padding: Double, alignment: Document.Alignment) {
+    /// Fits Auto Balance's per-edge insets to the model's uniform padding plus alignment, which
+    /// place the image, and per-edge padding, which sizes the canvas. Exact when only one axis
+    /// is unbalanced (the usual window shadow). Each edge is at least `padding`, so the
+    /// renderer's padding-plus-alignment placement always fits inside the canvas.
+    static func balanced(_ insets: EffectsInsets) -> Balanced {
         let horizontal = side(insets.left, insets.right)
         let vertical = side(insets.top, insets.bottom)
         let padding: Double = if vertical != 0 {
@@ -104,7 +129,17 @@ enum BackgroundMath {
         }
         let grid: [[Document.Alignment]] = [[.topLeft, .top, .topRight], [.left, .center, .right],
                                             [.bottomLeft, .bottom, .bottomRight]]
-        return (padding.rounded(), grid[vertical + 1][horizontal + 1])
+        let uniform = padding.rounded()
+        let edges = EffectsInsets(top: max(insets.top, uniform).rounded(), left: max(insets.left, uniform).rounded(),
+                                  bottom: max(insets.bottom, uniform).rounded(),
+                                  right: max(insets.right, uniform).rounded())
+        return Balanced(padding: uniform, alignment: grid[vertical + 1][horizontal + 1], edges: edges)
+    }
+
+    struct Balanced {
+        var padding: Double
+        var alignment: Document.Alignment
+        var edges: EffectsInsets
     }
 
     /// -1 when the leading side is tighter, 1 when the trailing side is, 0 within a pixel.
@@ -124,8 +159,11 @@ enum ImageOps {
 
     static func crop(_ image: CGImage, to rect: CGRect) -> Result? {
         let pixels = CropMath.pixelRect(rect, imageSize: CGSize(width: image.width, height: image.height))
-        guard pixels.width >= 1, pixels.height >= 1, let cropped = image.cropping(to: pixels) else { return nil }
-        return Result(image: cropped) { CGPoint(x: $0.x - pixels.minX, y: $0.y - pixels.minY) }
+        // Copy into a fresh bitmap: `cropping(to:)` keeps the whole source alive, which would
+        // make each undo step retain every earlier full-size image.
+        guard pixels.width >= 1, pixels.height >= 1, let cropped = image.cropping(to: pixels),
+              let copy = draw(cropped, size: pixels.size, transform: .identity) else { return nil }
+        return Result(image: copy) { CGPoint(x: $0.x - pixels.minX, y: $0.y - pixels.minY) }
     }
 
     /// Quarter turn. Clockwise moves the top-left corner to the top-right.

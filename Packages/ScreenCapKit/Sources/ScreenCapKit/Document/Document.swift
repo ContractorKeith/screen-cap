@@ -95,14 +95,23 @@ extension Document {
         /// Shadow under the base image.
         public var shadow: Shadow?
         public var alignment: Alignment
+        /// Per-edge canvas padding from Auto Balance. Nil means `padding` on every edge.
+        /// Optional so older files decode unchanged; cleared when the user sets `padding`.
+        public var edgePadding: EffectsInsets?
 
         public init(fill: BackgroundFill, padding: Double = 64, cornerRadius: Double = 12,
-                    shadow: Shadow? = Shadow(), alignment: Alignment = .center) {
+                    shadow: Shadow? = Shadow(), alignment: Alignment = .center, edgePadding: EffectsInsets? = nil) {
             self.fill = fill
             self.padding = padding
             self.cornerRadius = cornerRadius
             self.shadow = shadow
             self.alignment = alignment
+            self.edgePadding = edgePadding
+        }
+
+        /// The padding the canvas layout uses: `edgePadding`, or `padding` on every edge.
+        public var resolvedPadding: EffectsInsets {
+            edgePadding ?? EffectsInsets(all: padding)
         }
     }
 
@@ -140,5 +149,26 @@ extension Document {
         }
         if case let .customImage(layerName) = background?.fill { names.insert(layerName) }
         return names
+    }
+}
+
+/// Stored in `Background.edgePadding` as `{"top", "left", "bottom", "right"}`.
+extension EffectsInsets: Codable {
+    private enum CodingKeys: String, CodingKey { case top, left, bottom, right }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(top: try container.decode(CGFloat.self, forKey: .top),
+                  left: try container.decode(CGFloat.self, forKey: .left),
+                  bottom: try container.decode(CGFloat.self, forKey: .bottom),
+                  right: try container.decode(CGFloat.self, forKey: .right))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(top, forKey: .top)
+        try container.encode(left, forKey: .left)
+        try container.encode(bottom, forKey: .bottom)
+        try container.encode(right, forKey: .right)
     }
 }
