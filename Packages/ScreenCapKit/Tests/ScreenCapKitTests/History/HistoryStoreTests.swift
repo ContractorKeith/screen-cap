@@ -68,6 +68,22 @@ struct HistoryStoreTests {
         #expect(await store.records(filter: .window, query: "invoice").isEmpty)
     }
 
+    /// #53: OCR text set after the capture is searchable and survives a reopen; `.text` filters.
+    @Test func ocrTextPersistsAndIsSearchableByKind() async throws {
+        let dir = try HistoryFixtures.tempDirectory()
+        defer { try? fileManager.removeItem(at: dir) }
+        let image = HistoryFixtures.image(width: 10, height: 10)
+        let store = try makeStore(dir, clock: TestClock())
+        let grab = try await store.add(image: image, kind: .text)
+        _ = try await store.add(image: image, kind: .area)
+        try await store.setOCRText(id: grab.id, text: "Quarterly Zebra report")
+
+        let reopened = try makeStore(dir, clock: TestClock())
+        #expect(await reopened.records(query: "zebra").map(\.id) == [grab.id])
+        #expect(await reopened.records(filter: .text).map(\.id) == [grab.id])
+        #expect(await reopened.record(id: grab.id)?.ocrText == "Quarterly Zebra report")
+    }
+
     @Test func markClosedRecentlyClosedRestore() async throws {
         let dir = try HistoryFixtures.tempDirectory()
         defer { try? fileManager.removeItem(at: dir) }
