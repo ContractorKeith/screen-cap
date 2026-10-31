@@ -32,7 +32,7 @@ struct AccessibilityLabelTests {
         #expect(A11y.colorName(RGBAColor(red: 0.5, green: 0.5, blue: 0.5)) == "Gray")
     }
 
-    @Test func afterCaptureLabelsNameTheirRow() {
+    @Test @MainActor func afterCaptureLabelsNameTheirRow() {
         let labels = CaptureShortcut.allCases.map { A11y.afterCaptureLabel(GeneralSettingsPane.title(for: $0)) }
         #expect(Set(labels).count == labels.count)
         #expect(labels.first == "After capture: Area")
