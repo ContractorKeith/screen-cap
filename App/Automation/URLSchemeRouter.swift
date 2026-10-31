@@ -32,8 +32,23 @@ final class URLSchemeRouter {
         self.displayFrames = displayFrames
     }
 
-    /// Parses and runs a URL; parse errors go to `showError`.
+    /// What an incoming URL is: a file Finder or `open -a` hands us, or a `screencap://` command.
+    enum Incoming: Equatable {
+        case document(URL)
+        case automation(URL)
+    }
+
+    /// File URLs (a `.screencap` project or an image) go to the editor, never the parser (#91).
+    static func classify(_ url: URL) -> Incoming {
+        url.isFileURL ? .document(url) : .automation(url)
+    }
+
+    /// Opens a file in the editor, or parses and runs a `screencap://` URL; parse errors go to `showError`.
     func open(_ url: URL) {
+        if case let .document(file) = Self.classify(url) {
+            handler.post(.openAnnotateRequested, userInfo: [AutomationKey.url: file])
+            return
+        }
         do {
             route(try parser.parse(url))
         } catch {
