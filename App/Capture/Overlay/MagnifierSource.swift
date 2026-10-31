@@ -97,8 +97,18 @@ actor ScreenPixelSampler: PixelSampler {
 
     private func shareableContent() async throws -> SCShareableContent {
         if let content { return content }
-        let fresh = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let fresh = try await Self.fetchShareableContent().value
         content = fresh
         return fresh
     }
+
+    /// Older SDKs (CI's macOS 15 runner) don't mark `SCShareableContent` Sendable; it is immutable.
+    private nonisolated static func fetchShareableContent() async throws -> UncheckedSendable<SCShareableContent> {
+        UncheckedSendable(try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true))
+    }
+}
+
+private struct UncheckedSendable<Value>: @unchecked Sendable {
+    let value: Value
+    init(_ value: Value) { self.value = value }
 }
