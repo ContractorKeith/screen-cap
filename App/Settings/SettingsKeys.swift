@@ -13,7 +13,9 @@ enum SettingsKeys {
     static let plain: [String] = [
         settingsTab,
         QuickAccessPreferences.showAfterCaptureKey,
-        TextRecognitionPreferences.copyBarcodePayloadKey
+        TextRecognitionPreferences.copyBarcodePayloadKey,
+        // One-time "saving makes redactions permanent" confirmation; Reset asks again (#80).
+        "EditorRedactionBakeConfirmed" // EditorDocumentModel.redactionBakeConfirmedKey (main-actor)
     ]
 
     /// `ScrollingSettings` (Scrolling pane).

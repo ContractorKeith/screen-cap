@@ -120,7 +120,27 @@ final class QuickAccessToolbarView: NSView {
         return button
     }
 
+    /// Turns one command's button on or off (Save while a save is running).
+    func setEnabled(_ enabled: Bool, for command: QuickAccessCommand) {
+        let tag = QuickAccessCommand.allCases.firstIndex(of: command) ?? 0
+        for case let button as NSButton in allSubviews where button.tag == tag && button.action == #selector(fire(_:)) {
+            button.isEnabled = enabled
+            button.alphaValue = enabled ? 1 : 0.5
+        }
+    }
+
+    private var allSubviews: [NSView] {
+        var result: [NSView] = []
+        var stack: [NSView] = subviews
+        while let view = stack.popLast() {
+            result.append(view)
+            stack.append(contentsOf: view.subviews)
+        }
+        return result
+    }
+
     @objc private func fire(_ sender: NSButton) {
+        guard sender.isEnabled else { return }
         onCommand?(QuickAccessCommand.allCases[sender.tag])
     }
 }

@@ -83,10 +83,27 @@ struct HistoryActions {
         panel.nameFieldStringValue = (name as NSString).deletingPathExtension + "." + record.fileURL.pathExtension
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
-            try FileManager.default.copyItem(at: record.fileURL, to: url)
+            try Self.export(record.fileURL, to: url)
         } catch {
             NSAlert(error: error).runModal()
+        }
+    }
+
+    /// Copies `source` to `destination`, replacing it only once the copy exists (#78): copies to a
+    /// temp file beside the destination, then swaps it in. A failed copy leaves the destination alone.
+    nonisolated static func export(_ source: URL, to destination: URL, fileManager: FileManager = .default) throws {
+        let folder = destination.deletingLastPathComponent()
+        let temp = folder.appendingPathComponent(".\(UUID().uuidString)-\(destination.lastPathComponent)")
+        try fileManager.copyItem(at: source, to: temp)
+        do {
+            if fileManager.fileExists(atPath: destination.path) {
+                _ = try fileManager.replaceItemAt(destination, withItemAt: temp)
+            } else {
+                try fileManager.moveItem(at: temp, to: destination)
+            }
+        } catch {
+            try? fileManager.removeItem(at: temp)
+            throw error
         }
     }
 
