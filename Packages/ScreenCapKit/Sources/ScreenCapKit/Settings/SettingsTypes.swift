@@ -73,18 +73,3 @@ public struct QuickAccessOptions: Codable, Equatable, Sendable {
         self.display = display
     }
 }
-
-/// A palette color, 0...1 per channel.
-public struct RGBAColor: Codable, Equatable, Hashable, Sendable {
-    public var red: Double
-    public var green: Double
-    public var blue: Double
-    public var alpha: Double
-
-    public init(red: Double, green: Double, blue: Double, alpha: Double = 1) {
-        self.red = red
-        self.green = green
-        self.blue = blue
-        self.alpha = alpha
-    }
-}

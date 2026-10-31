@@ -81,7 +81,4 @@ public struct Region: Equatable, Sendable {
     }
 }
 
-/// What to do with a capture once it's taken. Raw values are the URL spelling.
-public enum AfterCaptureAction: String, CaseIterable, Sendable {
-    case copy, save, annotate, pin, overlay
-}
+// `AfterCaptureAction` is defined in Settings/SettingsTypes.swift; raw values are the URL spelling.
