@@ -196,11 +196,11 @@ enum EditorGeometry {
             let along = Double(step) / Double(count)
             let rest = 1 - along
             // Bernstein weights, kept as named values so the type checker stays fast.
-            let w0: Double = rest * rest
-            let w1: Double = 2 * rest * along
-            let w2: Double = along * along
-            let x: Double = w0 * start.x + w1 * control.x + w2 * end.x
-            let y: Double = w0 * start.y + w1 * control.y + w2 * end.y
+            let startWeight: Double = rest * rest
+            let controlWeight: Double = 2 * rest * along
+            let endWeight: Double = along * along
+            let x: Double = startWeight * start.x + controlWeight * control.x + endWeight * end.x
+            let y: Double = startWeight * start.y + controlWeight * control.y + endWeight * end.y
             return CGPoint(x: x, y: y)
         }
     }
