@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-lint:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcode-select -p
+          swift --version
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+      - name: SwiftLint
+        run: |
+          command -v swiftlint || brew install swiftlint
+          swiftlint --strict --reporter github-actions-logging

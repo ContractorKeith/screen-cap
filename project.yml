@@ -1,0 +1,42 @@
+# Secondary build path for Xcode users: `xcodegen generate && open ScreenCap.xcodeproj`.
+# The primary build is SwiftPM (Package.swift); keep both in sync.
+name: ScreenCap
+options:
+  bundleIdPrefix: com.contractorkeith
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+packages:
+  ScreenCapKit:
+    path: .
+targets:
+  ScreenCap:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+        excludes:
+          - Resources/Info.plist
+    dependencies:
+      - package: ScreenCapKit
+        product: ScreenCapKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.contractorkeith.screencap
+        INFOPLIST_FILE: App/Resources/Info.plist
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+schemes:
+  ScreenCap:
+    build:
+      targets:
+        ScreenCap: all
+    test:
+      targets:
+        - package: ScreenCapKit/ScreenCapKitTests
