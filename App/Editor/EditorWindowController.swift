@@ -73,10 +73,18 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window?.makeFirstResponder(canvas)
         // Fit once the hosting view has laid out the scroll view.
         DispatchQueue.main.async { [weak self] in self?.zoomToFit(nil) }
+        detectTextIfNeeded()
+    }
+
+    /// Finds text in a new base image, for automatic "Use as redaction" flags.
+    private func detectTextIfNeeded() {
+        guard model.detectedText?.image !== model.baseImage, model.textDetection == nil else { return }
+        Task { [model] in await model.detectedTextLines() }
     }
 
     private func modelDidChange() {
         canvas.modelDidChange()
+        detectTextIfNeeded()
         updateTitle()
         if preferences.rememberLastTool, model.tool != .crop { preferences.lastTool = model.tool }
     }
@@ -126,22 +134,13 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - Close
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        canvas.commitTextEditing()
-        guard model.isDirty else { return true }
-        let alert = NSAlert()
-        alert.messageText = "Save changes to this screenshot?"
-        alert.informativeText = "Your annotations will be lost if you don’t save them."
-        alert.addButton(withTitle: "Save…")
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Don’t Save")
-        alert.beginSheetModal(for: sender) { [weak self] response in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                switch response {
-                case .alertFirstButtonReturn: self.saveDocument(nil, thenClose: true)
-                case .alertThirdButtonReturn: self.forceClose()
-                default: break
-                }
+        guard hasUnsavedChanges else { return true }
+        UnsavedChangesPrompt.show(for: sender, quitting: false) { [weak self] outcome in
+            guard let self else { return }
+            switch outcome {
+            case .saved: self.saveDocument { saved in if saved { self.forceClose() } }
+            case .discarded: self.forceClose()
+            case .cancelled: break
             }
         }
         return false

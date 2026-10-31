@@ -40,7 +40,8 @@ public enum ProjectFile {
     /// volume, which then replaces (or becomes) `url`. A failed write leaves `url` untouched.
     /// - Parameters:
     ///   - preview: Flattened render for Quick Look. When nil, a downscaled base image is used.
-    ///   - bakeRedactions: Flatten blur and pixelate into `base.png` first (see `bakingRedactions`),
+    ///   - bakeRedactions: Flatten blur, pixelate and objects marked `redaction == true` into
+    ///     `base.png` first (see `bakingRedactions`),
     ///     so the package never holds the pixels they hide. On by default; only tests turn it off.
     public static func write(
         _ document: Document,
@@ -123,13 +124,16 @@ public enum ProjectFile {
 
     // MARK: - Redaction baking
 
-    /// True if `document` has a blur or pixelate that saving will bake into `base.png`.
+    /// True if `document` has a blur, pixelate or object marked as a redaction that saving will
+    /// bake into `base.png`. Automatic flags (`redaction == nil`) don't count; resolve them first
+    /// with `Document.resolvingRedactions(textLines:)`.
     public static func containsRedactions(_ document: Document) -> Bool {
         document.annotations.contains(where: \.isBakedRedaction)
     }
 
-    /// Flattens every blur and pixelate into the base image, together with any object drawn
-    /// beneath one and overlapping it (directly or through another baked object), so neither
+    /// Flattens every blur, pixelate and object marked as a redaction into the base image,
+    /// together with any object drawn beneath one and overlapping it (directly or through another
+    /// baked object), so neither
     /// the hidden pixels nor a hidden object's data survive in the package. Objects above the
     /// redactions stay editable. Layers no longer referenced are dropped.
     ///
@@ -223,7 +227,7 @@ private extension Annotation {
     var isBakedRedaction: Bool {
         switch kind {
         case .blur, .pixelate: true
-        default: false
+        default: redaction == true
         }
     }
 
