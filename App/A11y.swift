@@ -18,6 +18,10 @@ enum A11y {
     static let cropAspect = "Crop aspect ratio"
     static let inspectorPanel = "Inspector panel"
 
+    /// Resize sheet fields (#132); their visible "Width (px)" captions aren't attached to them.
+    static let resizeWidth = "Width in pixels"
+    static let resizeHeight = "Height in pixels"
+
     // MARK: Inspector
 
     static let pickScreenColor = "Pick color from screen"
@@ -92,10 +96,14 @@ enum A11y {
     /// "After capture: Area" for each row's action popup.
     static func afterCaptureLabel(_ row: String) -> String { "After capture: \(row)" }
 
+    /// Advanced → History retention popup (#132).
+    static let historyRetention = "Keep captures for"
+
     // MARK: History
 
     static let historySearch = "Search captures"
     static let historyKindFilter = "Capture kind filter"
+    static let historyGrid = "Captures"
 
     /// "Area capture, Oct 31, 4:08 PM, Google Chrome".
     static func historyThumbnail(kind: String, date: Date, source: String?, closed: Bool) -> String {

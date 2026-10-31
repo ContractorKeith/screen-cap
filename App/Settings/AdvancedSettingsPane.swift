@@ -19,11 +19,12 @@ struct AdvancedSettingsPane: View {
     var body: some View {
         Form {
             Section("History") {
-                Picker("Keep captures for", selection: retentionBinding) {
+                Picker(A11y.historyRetention, selection: retentionBinding) {
                     ForEach(Self.retentionChoices, id: \.self) { days in
                         Text(RetentionChange.days(days)).tag(days)
                     }
                 }
+                .accessibilityLabel(A11y.historyRetention)
                 HStack {
                     Button("Purge Now", action: purge)
                         .disabled(history == nil)

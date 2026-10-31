@@ -143,6 +143,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.post(name: .openHistoryRequested, object: nil)
         case .toggleOverlays:
             NotificationCenter.default.post(name: .toggleOverlaysRequested, object: nil)
+        case .focusQuickAccess:
+            NotificationCenter.default.post(name: .focusQuickAccessRequested, object: nil)
         }
     }
 

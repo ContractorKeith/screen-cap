@@ -21,6 +21,16 @@ final class QuickAccessThumbnailView: NSView, NSDraggingSource {
 
     private let image: CGImage
     private var mouseDownPoint: NSPoint?
+    private var isHovered = false
+    /// Keyboard focus (#129): a focus ring and the toolbar stay up while the panel is key.
+    var isFocused = false {
+        didSet {
+            layer?.borderWidth = isFocused ? 3 : 1
+            layer?.borderColor = isFocused ? NSColor.keyboardFocusIndicatorColor.cgColor
+                                           : NSColor.white.withAlphaComponent(0.3).cgColor
+            updateToolbar()
+        }
+    }
     private var gesture = SwipeGesture()
 
     init(image: CGImage) {
@@ -60,11 +70,16 @@ final class QuickAccessThumbnailView: NSView, NSDraggingSource {
     override func mouseExited(with event: NSEvent) { setHovered(false) }
 
     private func setHovered(_ hovered: Bool) {
+        isHovered = hovered
+        updateToolbar()
+        onHover?(hovered)
+    }
+
+    private func updateToolbar() {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
-            toolbar.animator().alphaValue = hovered ? 1 : 0
+            toolbar.animator().alphaValue = isHovered || isFocused ? 1 : 0
         }
-        onHover?(hovered)
     }
 
     // MARK: - Click and drag
