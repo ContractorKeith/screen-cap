@@ -54,7 +54,9 @@ struct SelectionOptions {
     /// Show the frozen still behind the overlay. Off means live mode: dim only.
     var showsStill = true
     var showsCrosshair = true
-    var showsMagnifier = true
+    /// Where the magnifier reads pixels; `.off` hides it.
+    var magnifier: MagnifierSource = .frozenStill
+    var showsMagnifier: Bool { magnifier != .off }
     /// After a selection, show the All-In-One toolbar instead of finishing.
     var allInOne = false
     var startMode: SelectionMode = .area

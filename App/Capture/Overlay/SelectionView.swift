@@ -7,12 +7,10 @@ import ScreenCapKit
 /// exactly covers its display.
 final class SelectionView: NSView {
     let display: DisplayInfo
-    private let still: CapturedImage?
     private unowned let overlay: SelectionOverlay
 
-    init(display: DisplayInfo, still: CapturedImage?, overlay: SelectionOverlay) {
+    init(display: DisplayInfo, overlay: SelectionOverlay) {
         self.display = display
-        self.still = still
         self.overlay = overlay
         super.init(frame: CGRect(origin: .zero, size: display.frame.size))
         wantsLayer = true
@@ -97,8 +95,8 @@ final class SelectionView: NSView {
             drawCrosshair(context, at: localPoint(state.mouse))
         }
         if overlay.options.showsMagnifier {
-            Magnifier.draw(in: bounds, global: state.mouse, still: still, display: display,
-                           selection: state.rect?.size)
+            Magnifier.draw(in: bounds, global: state.mouse, still: overlay.magnifierImage(for: display),
+                           display: display, selection: state.rect?.size)
         }
     }
 
