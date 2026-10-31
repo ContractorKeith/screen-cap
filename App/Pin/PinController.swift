@@ -116,8 +116,13 @@ final class PinController: CaptureSink {
         switch command {
         case .copy:
             Task {
-                try? await output.copy(result)
-                HUDPanel.show("Copied")
+                do {
+                    try await output.copy(result)
+                    HUDPanel.show(Self.copyMessage(error: nil))
+                } catch {
+                    appLog.error("Pin copy failed: \(error.localizedDescription, privacy: .public)")
+                    HUDPanel.show(Self.copyMessage(error: error), duration: .seconds(4))
+                }
             }
         case .save:
             Task {
@@ -125,7 +130,8 @@ final class PinController: CaptureSink {
                     let url = try await output.save(result)
                     HUDPanel.show("Saved \(url.lastPathComponent)")
                 } catch {
-                    HUDPanel.show("Save failed")
+                    appLog.error("Pin save failed: \(error.localizedDescription, privacy: .public)")
+                    HUDPanel.show("Save failed: \(error.localizedDescription)", duration: .seconds(4))
                 }
             }
         case .annotate:
@@ -139,6 +145,12 @@ final class PinController: CaptureSink {
             panel.close()
             pins.removeAll { $0.panel === panel }
         }
+    }
+
+    /// HUD text for Copy: "Copied" only when the copy worked (#78).
+    nonisolated static func copyMessage(error: Error?) -> String {
+        guard let error else { return "Copied" }
+        return "Copy failed: \(error.localizedDescription)"
     }
 
     /// Menu-bar "Unlock All Pins".

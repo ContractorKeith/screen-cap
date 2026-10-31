@@ -16,6 +16,8 @@ final class QuickAccessController: CaptureSink {
     private(set) var items: [QuickAccessItem] = []
     private var screen: NSScreen?
     private var ticker: Timer?
+    /// Coalesces concurrent saves of one capture (+Commands).
+    let saveGate = QuickAccessSaveGate<QuickAccessSaveKey>()
 
     init(settings: AppSettings, output: CaptureOutput, history: HistoryStore?, router: CaptureSinkRouter?) {
         self.settings = settings

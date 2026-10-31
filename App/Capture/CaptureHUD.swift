@@ -1,8 +1,22 @@
 import AppKit
 import ScreenCapKit
 
+/// Which visible HUDs a new one replaces (#78). A HUD with buttons may be the only way to recover
+/// a capture (Copy to Clipboard), so it stays and the new one stacks below it; plain messages are
+/// replaced. At most `maxVisible` stay up; past that the oldest goes.
+enum CaptureHUDStack {
+    static let maxVisible = 4
+
+    /// Indices (oldest first) of visible HUDs to keep when a new one appears.
+    static func kept(hasButtons: [Bool]) -> [Int] {
+        let actionable = hasButtons.indices.filter { hasButtons[$0] }
+        return Array(actionable.suffix(maxVisible - 1))
+    }
+}
+
 /// A rounded panel near the top of the screen for capture problems, with up to a few buttons.
-/// It fades out on its own (longer when it offers actions); a new one replaces the visible one.
+/// It fades out on its own (longer when it offers actions). A new one replaces plain messages and
+/// stacks below ones that still offer an action (`CaptureHUDStack`).
 @MainActor
 final class CaptureHUD: NSObject {
     struct Button {
@@ -10,15 +24,17 @@ final class CaptureHUD: NSObject {
         let action: @MainActor () -> Void
     }
 
-    private static var current: CaptureHUD?
+    /// On screen, oldest first (top of the stack).
+    private static var visible: [CaptureHUD] = []
     private let panel: NSPanel
     private let buttons: [Button]
     private var dismissTask: Task<Void, Never>?
 
     static func show(_ message: String, detail: String? = nil, buttons: [Button] = []) {
-        current?.close()
+        let keep = Set(CaptureHUDStack.kept(hasButtons: visible.map { !$0.buttons.isEmpty }))
+        for (index, hud) in visible.enumerated() where !keep.contains(index) { hud.close() }
         let hud = CaptureHUD(message: message, detail: detail, buttons: buttons)
-        current = hud
+        visible.append(hud)
         hud.present(for: buttons.isEmpty ? .seconds(4) : .seconds(10))
     }
 
@@ -82,9 +98,12 @@ final class CaptureHUD: NSObject {
 
     private func present(for duration: Duration) {
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
-        if let visible = screen?.visibleFrame {
+        if let frame = screen?.visibleFrame {
+            // Below any HUD still showing an action.
+            let above = Self.visible.filter { $0 !== self }.map(\.panel.frame.minY).min()
+            let top = above.map { $0 - 8 } ?? frame.maxY - 40
             let size = panel.frame.size
-            panel.setFrameOrigin(NSPoint(x: visible.midX - size.width / 2, y: visible.maxY - size.height - 40))
+            panel.setFrameOrigin(NSPoint(x: frame.midX - size.width / 2, y: top - size.height))
         }
         panel.orderFrontRegardless()
         dismissTask = Task { [weak self] in
@@ -97,7 +116,7 @@ final class CaptureHUD: NSObject {
     private func close() {
         dismissTask?.cancel()
         panel.orderOut(nil)
-        if Self.current === self { Self.current = nil }
+        Self.visible.removeAll { $0 === self }
     }
 
     @objc private func buttonPressed(_ sender: NSButton) {
