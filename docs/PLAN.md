@@ -208,6 +208,17 @@ pixels, and "secure" modes add random noise per block so no deconvolution or ave
 attack recovers text. A test exports a redacted line of text and asserts Vision can no
 longer read it.
 
+Secure blocks are never smaller than 40% of the redaction rect's shorter side (and 8 output
+px), so large text and 2x exports don't weaken it, and two randomized passes run on offset
+grids. A test matrix (text 12–72 px, the lowest slider values, 1x and 2x PNG export) proves
+Vision reads nothing back. **Smooth blur is cosmetic**: a plain Gaussian that OCR can read
+through. The inspector labels it "not for secrets"; Secure is the default.
+
+Saving a `.screencap` bakes blur and pixelate (and any object beneath and overlapping them)
+into `base.png`, so the package never holds the original pixels. Those redactions are no
+longer editable after the project is reopened; the editor confirms this once before the first
+such save. See `docs/file-format.md`.
+
 ### 5.7 Permissions
 Screen Recording (TCC) is required for any capture. First run shows an onboarding window
 that explains it, opens System Settings to the right pane, and detects when it's granted.

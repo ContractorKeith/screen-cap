@@ -32,13 +32,15 @@ Requires macOS 14 Sonoma or newer.
 **Annotate**
 - Arrows (4 styles), rectangles, ellipses, lines, text (7 styles), numbered counters,
   smoothed pencil, a highlighter that snaps to text lines, spotlight.
-- Blur and pixelate that are baked into the pixels and can't be reversed.
+- Secure blur and randomized pixelate (the defaults) scramble the pixels so OCR can't read the
+  text back. Smooth blur is cosmetic only: don't use it on secrets.
 - Crop with aspect ratios, rotate, flip, resize, screen color picker with a saved palette,
   drop in another image.
 - Background tool: padding, corner radius, shadow, bundled or custom backgrounds, Auto
   Balance, presets.
 - Every object stays editable. Export PNG, JPEG, HEIC, TIFF, or PDF, or save a
-  `.screencap` project to reopen later. Share sheet.
+  `.screencap` project to reopen later. Share sheet. Blur and pixelate are flattened into a
+  saved project, so the original pixels never leave your Mac in the file.
 
 **Also**
 - Pin any capture as a floating, always-on-top image; lock it so clicks pass through.
