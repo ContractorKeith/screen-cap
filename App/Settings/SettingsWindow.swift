@@ -10,9 +10,13 @@ struct SettingsView: View {
         TabView {
             GeneralSettingsPane(settings: settings)
                 .tabItem { Label("General", systemImage: "gearshape") }
+            QuickAccessSettingsPane(settings: settings)
+                .tabItem { Label("Quick Access", systemImage: "rectangle.stack") }
             ShortcutsSettingsPane()
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
             ScrollingSettingsPane(settings: .shared).tabItem { Label("Scrolling", systemImage: "scroll") }
+            TextRecognitionSettingsPane(settings: settings)
+                .tabItem { Label("Text Recognition", systemImage: "text.viewfinder") }
         }
         .frame(width: 520, height: 560)
     }

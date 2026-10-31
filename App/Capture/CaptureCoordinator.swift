@@ -19,7 +19,8 @@ final class CaptureCoordinator {
     var scrollingHandler: (@MainActor (CGRect, FilenameTemplate.Context, AfterCaptureAction?) async -> Void)?
     /// Region for the next scrolling capture, skipping the selection overlay (`--region`). Used once.
     var scrollingRegion: CGRect?
-    private let history: HistoryStore?
+    /// Shared with features that update records (Quick Access close/restore/delete).
+    let history: HistoryStore?
     private let hasPermission: () -> Bool
     private let showOnboarding: () -> Void
     private var current: Task<Void, Never>?
