@@ -43,6 +43,14 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 ContractorKeith. MIT License.</string>
+	<key>SUFeedURL</key>
+	<string>https://github.com/ContractorKeith/screen-cap/releases/latest/download/appcast.xml</string>
+	<!-- Generate once with Sparkle's generate_keys and commit the public key here (see scripts/appcast.sh).
+	     While this is the placeholder, the updater stays off and Check for Updates opens the releases page. -->
+	<key>SUPublicEDKey</key>
+	<string>REPLACE_WITH_SUPublicEDKey_FROM_generate_keys</string>
+	<key>SUEnableInstallerLauncherService</key>
+	<false/>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>ScreenCap needs Screen Recording access to take screenshots of your displays and windows.</string>
 </dict>

@@ -10,7 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launch: LaunchArguments
     private let settings = AppSettings()
     private let onboarding = PermissionOnboardingController()
-    private lazy var settingsWindow = SettingsWindowController(settings: settings)
+    private let updater = UpdaterController()
+    private lazy var settingsWindow = SettingsWindowController(settings: settings, updater: updater)
     private lazy var history = Self.openHistory(retentionDays: settings.historyRetentionDays)
     private let desktopIcons = DesktopIconsController()
     private lazy var coordinator = CaptureCoordinator(
@@ -41,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // No Dock icon. LSUIElement does this for the bundle; this covers `swift run`.
         NSApp.setActivationPolicy(.accessory)
         coordinator.sink = sinkRouter
+        onboarding.firstCapture = { [weak self] in _ = self?.coordinator.capture(.area) }
         installFeatures()
         menuBar = MenuBarController(entries: AppMenu.entries(menuActions))
         let shortcuts = ShortcutController { [weak self] command in self?.perform(command) }
@@ -52,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let kind = launch.capture {
             runLaunchCapture(kind)
-        } else if !ScreenRecordingPermission.isGranted {
+        } else if onboarding.shouldShowAtLaunch {
             onboarding.show()
         }
     }
@@ -86,7 +88,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             launchAtLoginIsOn: { LaunchAtLogin.isEnabled },
             quit: { NSApp.terminate(nil) },
             pinFromClipboard: { [weak self] in self?.pins.pinFromClipboard() },
-            unlockAllPins: { [weak self] in self?.pins.unlockAll() }
+            unlockAllPins: { [weak self] in self?.pins.unlockAll() },
+            checkForUpdates: { [weak self] in self?.updater.checkForUpdates() }
         )
     }
 

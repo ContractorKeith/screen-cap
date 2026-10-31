@@ -8,7 +8,7 @@ v1 in the feature matrix in `docs/PLAN.md`.
 ## Status
 First working build (2026-10-31): M0–M7 merged, 337 tests green. Capture (area/window/fullscreen/
 previous/timer/all-in-one/scrolling), Quick Access, Annotate editor, OCR/QR, pins, history, URL
-scheme, settings all run from `make run`. Next: M8 ship (issue #29), then real-world QA passes.
+scheme, settings all run from `make run`. M8 ship (#29): DMG, release workflow, Sparkle (off until keyed), cask, README. Next: real-world QA passes.
 Grant Screen Recording to `build/ScreenCap.app` once in System Settings; ad-hoc signatures change
 per rebuild, so re-grant after `make clean`.
 
@@ -21,6 +21,8 @@ make build        # swift build (debug)
 make test         # swift test; adds Swift Testing paths when only Command Line Tools are active
 make bundle       # scripts/bundle.sh -> build/ScreenCap.app (release, ad-hoc signed, icon)
 make run          # bundle, then relaunch build/ScreenCap.app
+make dmg          # bundle, then dist/ScreenCap-<version>.dmg (version from ScreenCapKit.version)
+make appcast      # Sparkle appcast for dist/ (needs SUPublicEDKey; see scripts/appcast.sh)
 make lint         # swiftlint --strict
 make clean
 pkill -x ScreenCap                                   # quit a running build
@@ -45,6 +47,10 @@ pkill -x ScreenCap                                   # quit a running build
 - Hidden launch options drive captures without key presses (CI smoke tests):
   `build/ScreenCap.app/Contents/MacOS/ScreenCap --capture <area|window|fullscreen|previousArea|selfTimer|allInOne|scrolling|text> [--action save|copy|overlay|annotate|pin] [--window <app>] [--quit]`.
   Launched from Terminal, Screen Recording permission is Terminal's.
+- Releases: bump `ScreenCapKit.version` and `CFBundleShortVersionString` together (dmg.sh and a
+  test fail on mismatch), update CHANGELOG.md, push an annotated `v<version>` tag; release.yml
+  builds the DMG and the GitHub Release. Sparkle stays off until `SUPublicEDKey` replaces the
+  Info.plist placeholder. bundle.sh embeds Sparkle.framework in Contents/Frameworks.
 - Original name, icon, UI, copy, backgrounds, and file format. Do not copy any other app's assets or branding.
 
 ## Out of Scope

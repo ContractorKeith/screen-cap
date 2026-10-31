@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+@preconcurrency import KeyboardShortcuts
 import SwiftUI
 
 /// Screen Recording (TCC) permission checks.
@@ -42,11 +43,37 @@ final class PermissionModel {
     }
 }
 
+/// When the welcome window opens at launch. Pure so the rule is testable.
+enum WelcomePolicy {
+    static let dontShowAgainKey = "welcome.dontShowAgain"
+
+    /// Missing permission always shows it (nothing works without it); otherwise until the user opts out.
+    static func showAtLaunch(permissionGranted: Bool, dontShowAgain: Bool) -> Bool {
+        !permissionGranted || !dontShowAgain
+    }
+
+    /// The three shortcuts the welcome step teaches, in order.
+    @MainActor static let mainShortcuts: [ShortcutCatalog.Entry] = ShortcutCatalog.all.filter {
+        [.captureArea, .captureWindow, .captureFullscreen].contains($0.name)
+    }
+}
+
+/// Step 1 asks for Screen Recording; once granted, step 2 teaches the main shortcuts.
 struct PermissionOnboardingView: View {
     let model: PermissionModel
     let close: () -> Void
+    let takeFirstScreenshot: () -> Void
+    @AppStorage(WelcomePolicy.dontShowAgainKey) private var dontShowAgain = false
 
     var body: some View {
+        Group {
+            if model.isGranted { shortcutsStep } else { permissionStep }
+        }
+        .padding(24)
+        .frame(width: 460)
+    }
+
+    private var permissionStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Screen Recording access", systemImage: "rectangle.dashed.badge.record")
                 .font(.title2.bold())
@@ -56,29 +83,47 @@ struct PermissionOnboardingView: View {
                 Privacy & Security → Screen & System Audio Recording.
                 """)
                 .fixedSize(horizontal: false, vertical: true)
-            if model.isGranted {
-                Label("Permission granted. You're ready to capture.", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            } else {
-                Label("Waiting for permission…", systemImage: "hourglass")
-                    .foregroundStyle(.secondary)
-                Text("macOS may ask you to quit and reopen ScreenCap after you turn it on.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+            Label("Waiting for permission…", systemImage: "hourglass")
+                .foregroundStyle(.secondary)
+            Text("macOS may ask you to quit and reopen ScreenCap after you turn it on.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                if model.isGranted {
-                    Button("Done", action: close).keyboardShortcut(.defaultAction)
-                } else {
-                    Button("Later", action: close)
-                    Button("Open System Settings") { ScreenRecordingPermission.openSystemSettings() }
-                        .keyboardShortcut(.defaultAction)
-                }
+                Button("Later", action: close)
+                Button("Open System Settings") { ScreenRecordingPermission.openSystemSettings() }
+                    .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(24)
-        .frame(width: 460)
+    }
+
+    private var shortcutsStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("You're ready to capture", systemImage: "checkmark.circle.fill")
+                .font(.title2.bold())
+                .foregroundStyle(.green)
+            Text("ScreenCap lives in the menu bar. These work from any app:")
+            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
+                ForEach(WelcomePolicy.mainShortcuts, id: \.name.rawValue) { entry in
+                    GridRow {
+                        Text(entry.title)
+                        Text(KeyboardShortcuts.getShortcut(for: entry.name)?.description ?? "Not set")
+                            .font(.body.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Text("Change them in Settings → Shortcuts. The menu bar icon has every capture mode.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            HStack {
+                Toggle("Don't show again", isOn: $dontShowAgain)
+                Spacer()
+                Button("Done", action: close)
+                Button("Take Your First Screenshot", action: takeFirstScreenshot)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
     }
 }
 
@@ -86,10 +131,23 @@ struct PermissionOnboardingView: View {
 final class PermissionOnboardingController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model = PermissionModel()
+    /// Runs the area capture; set by `AppDelegate` once the coordinator exists.
+    var firstCapture: @MainActor () -> Void = {}
+
+    var shouldShowAtLaunch: Bool {
+        WelcomePolicy.showAtLaunch(
+            permissionGranted: ScreenRecordingPermission.isGranted,
+            dontShowAgain: UserDefaults.standard.bool(forKey: WelcomePolicy.dontShowAgainKey)
+        )
+    }
 
     func show() {
         if window == nil {
-            let view = PermissionOnboardingView(model: model) { [weak self] in self?.window?.close() }
+            let view = PermissionOnboardingView(
+                model: model,
+                close: { [weak self] in self?.window?.close() },
+                takeFirstScreenshot: { [weak self] in self?.startFirstCapture() }
+            )
             let newWindow = NSWindow(contentViewController: NSHostingController(rootView: view))
             newWindow.title = "Welcome to ScreenCap"
             newWindow.styleMask = [.titled, .closable]
@@ -105,5 +163,14 @@ final class PermissionOnboardingController: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         model.stopPolling()
+    }
+
+    /// Closes the window first so it isn't frozen into the selection overlay.
+    private func startFirstCapture() {
+        window?.close()
+        Task { @MainActor [firstCapture] in
+            try? await Task.sleep(for: .milliseconds(300))
+            firstCapture()
+        }
     }
 }

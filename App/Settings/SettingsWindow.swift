@@ -20,6 +20,7 @@ final class SettingsNavigation {
 struct SettingsView: View {
     let settings: AppSettings
     let history: HistoryStore?
+    let updater: UpdaterController
     @Bindable var navigation: SettingsNavigation
 
     var body: some View {
@@ -48,7 +49,7 @@ struct SettingsView: View {
             WallpaperSettingsPane(settings: settings)
                 .tabItem { Label("Wallpaper", systemImage: "photo.on.rectangle") }
                 .tag(AutomationCommand.SettingsTab.wallpaper.rawValue)
-            AdvancedSettingsPane(settings: settings, history: history)
+            AdvancedSettingsPane(settings: settings, history: history, updater: updater)
                 .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
                 .tag(AutomationCommand.SettingsTab.advanced.rawValue)
             AboutSettingsPane()
@@ -62,20 +63,22 @@ struct SettingsView: View {
 @MainActor
 final class SettingsWindowController {
     private let settings: AppSettings
+    private let updater: UpdaterController
     /// Set in `AppDelegate.installFeatures()` before the window is first shown.
     var history: HistoryStore?
     let navigation = SettingsNavigation()
     private var window: NSWindow?
 
-    init(settings: AppSettings) {
+    init(settings: AppSettings, updater: UpdaterController) {
         self.settings = settings
+        self.updater = updater
     }
 
     /// Shows Settings, switching to `tab` when given (otherwise the last-used tab).
     func show(tab: AutomationCommand.SettingsTab? = nil) {
         if let tab { navigation.tab = tab.rawValue }
         if window == nil {
-            let view = SettingsView(settings: settings, history: history, navigation: navigation)
+            let view = SettingsView(settings: settings, history: history, updater: updater, navigation: navigation)
             let newWindow = NSWindow(contentViewController: NSHostingController(rootView: view))
             newWindow.title = "ScreenCap Settings"
             newWindow.styleMask = [.titled, .closable]
