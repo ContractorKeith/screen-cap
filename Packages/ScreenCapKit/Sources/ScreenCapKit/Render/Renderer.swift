@@ -74,7 +74,8 @@ public struct Renderer: Sendable {
             case .blur, .pixelate, .spotlight:
                 applyRedaction(annotation.kind, origin: origin, scale: scale, in: context)
             default:
-                AnnotationPainter.draw(annotation, layers: layers, scale: scale, in: context)
+                // Shapes used as redactions paint fully opaque (#99).
+                AnnotationPainter.draw(annotation.solidCover, layers: layers, scale: scale, in: context)
             }
         }
     }
