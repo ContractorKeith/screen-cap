@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 @testable import ScreenCap
 import ScreenCapKit
@@ -73,7 +74,7 @@ struct SettingsResetTests {
         // Live objects show defaults.
         #expect(settings.filenameTemplate == AppSettings.Defaults.filenameTemplate)
         #expect(settings.ocrKeepLineBreaks)
-        #expect(settings.historyRetentionDays == AppSettings.Defaults.historyRetentionDays)
+        #expect(settings.historyRetentionDays == 7) // kept: it governs stored captures (#125)
         expectDefaults(scrolling)
         expectDefaults(editor)
         // Nothing app-side is left stored, so a relaunch reads defaults too.
@@ -82,6 +83,47 @@ struct SettingsResetTests {
         expectDefaults(ScrollingSettings(defaults: defaults.store))
         expectDefaults(EditorPreferences(store: UserDefaultsSettingsStore(suiteName: defaults.name)))
         #expect(SettingsNavigation(defaults: defaults.store).tab == .general)
+    }
+
+    // MARK: - Reset keeps captures (#125)
+
+    @Test func resetKeepsCapturesOlderThanTheDefaultRetention() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ScreenCapResetTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // A capture made 60 days ago, kept by a 90-day retention.
+        let sixtyDaysAgo = Date().addingTimeInterval(-60 * 86_400)
+        let old = try await HistoryStore(directory: directory, retentionDays: nil, now: { sixtyDaysAgo })
+            .add(image: Self.image(), kind: .area)
+        let store = try HistoryStore(directory: directory, retentionDays: 90)
+        let settings = AppSettings(store: InMemorySettingsStore())
+        settings.historyRetentionDays = 90
+        let retention = HistoryRetention(store: store, settings: settings)
+        retention.start()
+        defer { retention.stop() }
+
+        let defaults = TemporaryDefaults()
+        defer { defaults.remove() }
+        SettingsReset.resetAll(settings: settings, scrolling: ScrollingSettings(defaults: defaults.store),
+                               editor: EditorPreferences(store: InMemorySettingsStore()), defaults: defaults.store)
+        // Let any change-triggered purge run, then the hourly one.
+        try await Task.sleep(for: .milliseconds(100))
+        retention.purge()
+        await retention.settled()
+
+        #expect(settings.historyRetentionDays == 90)
+        #expect(await store.record(id: old.id) != nil)
+        #expect(FileManager.default.fileExists(atPath: old.fileURL.path))
+    }
+
+    private static func image() -> CGImage {
+        let context = CGContext(
+            data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.setFillColor(red: 1, green: 0, blue: 0, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        return context.makeImage()!
     }
 
     private func expectDefaults(_ scrolling: ScrollingSettings) {

@@ -162,6 +162,16 @@ private struct HistoryCell: View {
                     .padding(.vertical, 2)
                     .background(.thinMaterial, in: Capsule())
                     .padding(6)
+                if let elongation {
+                    Text(elongation == .tall ? "Tall" : "Wide")
+                        .font(.caption2)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(.thinMaterial, in: Capsule())
+                        .padding(6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .help("Showing the start of a long capture; open it to see all of it")
+                }
                 if record.closedAt != nil {
                     Image(systemName: "arrow.uturn.backward.circle.fill")
                         .foregroundStyle(.secondary)
@@ -188,9 +198,24 @@ private struct HistoryCell: View {
                               source: record.appName ?? record.windowTitle, closed: record.closedAt != nil)
     }
 
+    /// Set for very tall or wide captures (scrolling), whose thumbnail shows only the start (#133).
+    private var elongation: Thumbnailer.Elongation? {
+        Thumbnailer.elongation(width: record.pixelWidth, height: record.pixelHeight)
+    }
+
     @ViewBuilder private var thumbnail: some View {
         if let image = ThumbnailCache.image(at: record.thumbnailURL) {
-            Image(nsImage: image).resizable().scaledToFit()
+            if let elongation {
+                // Fill the cell from the top (or leading edge) so older, uncropped thumbnails of
+                // long captures read the same as new cropped ones instead of a sliver.
+                Color.clear
+                    .overlay(alignment: elongation == .tall ? .top : .leading) {
+                        Image(nsImage: image).resizable().scaledToFill()
+                    }
+                    .clipped()
+            } else {
+                Image(nsImage: image).resizable().scaledToFit()
+            }
         } else {
             Image(systemName: "photo").font(.largeTitle).foregroundStyle(.tertiary)
         }
