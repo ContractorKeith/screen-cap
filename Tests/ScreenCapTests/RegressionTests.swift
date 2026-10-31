@@ -270,6 +270,10 @@ struct BuildNumberRegressionTests {
     @Test func builtBundleHasARealBuildNumber() throws {
         let plist = repoRoot.appendingPathComponent("build/ScreenCap.app/Contents/Info.plist")
         guard let info = NSDictionary(contentsOf: plist) as? [String: Any] else { return }
+        // A bundle older than scripts/bundle.sh predates the stamping change; CI always rebuilds first.
+        let script = repoRoot.appendingPathComponent("scripts/bundle.sh")
+        let modified = { (url: URL) in (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate }
+        if let plistDate = modified(plist), let scriptDate = modified(script), plistDate < scriptDate { return }
         let build = try #require(Int(info["CFBundleVersion"] as? String ?? ""))
         #expect(build > 1)
         #expect(info["CFBundleShortVersionString"] as? String == ScreenCapKit.version)
