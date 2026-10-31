@@ -52,7 +52,8 @@ final class EditorCoordinator: CaptureSink {
     func openImagePanel() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.png, .jpeg, .heic, .tiff, .image, EditorWindowController.projectType]
-        panel.canChooseDirectories = true // a .screencap package is a folder until its UTI is registered
+        // Info.plist exports the .screencap package type; this still covers `swift run`, where it isn't registered.
+        panel.canChooseDirectories = true
         panel.treatsFilePackagesAsDirectories = false
         panel.message = "Choose an image or a ScreenCap project to annotate."
         NSApp.activate(ignoringOtherApps: true)

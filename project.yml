@@ -36,6 +36,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.contractorkeith.screencap
+        # Shared with bundle.sh: URL scheme, CFBundleDocumentTypes and the exported
+        # com.contractorkeith.screencap.project package UTI (#91) live there for both builds.
         INFOPLIST_FILE: App/Resources/Info.plist
         CODE_SIGN_IDENTITY: "-"
         ENABLE_HARDENED_RUNTIME: YES

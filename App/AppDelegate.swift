@@ -59,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// `screencap://` commands and files opened from Finder / `open -a` (the router sends files to the editor).
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             appLog.notice("Received URL: \(url.absoluteString, privacy: .public)")

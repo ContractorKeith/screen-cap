@@ -56,6 +56,9 @@ pkill -x ScreenCap                                   # quit a running build
   test fail on mismatch), update CHANGELOG.md, push an annotated `v<version>` tag; release.yml
   builds the DMG and the GitHub Release. Sparkle stays off until `SUPublicEDKey` replaces the
   Info.plist placeholder. bundle.sh embeds Sparkle.framework in Contents/Frameworks.
+- SwiftPM resource bundles (KeyboardShortcuts' localizations) ship in `Contents/Resources`; their generated
+  `Bundle.module` only looks in the app root (which codesign forbids), so `App/ResourceBundles.swift` redirects
+  it at launch. Without that the Shortcuts pane traps on any Mac without the build checkout (#92).
 - Original name, icon, UI, copy, backgrounds, and file format. Do not copy any other app's assets or branding.
 
 ## Out of Scope
