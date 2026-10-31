@@ -6,8 +6,8 @@ public enum Spotlight {
     /// (top-left image pixels). Pixels inside any shape are left unchanged.
     public static func apply(
         _ image: CGImage,
-        shapes: [EffectsShape],
-        dimColor: EffectsColor = .black,
+        shapes: [Annotation.SpotlightShape],
+        dimColor: RGBAColor = .black,
         dimOpacity: Double = 0.5
     ) throws -> CGImage {
         let bitmap = try EffectsBitmap(image: image)

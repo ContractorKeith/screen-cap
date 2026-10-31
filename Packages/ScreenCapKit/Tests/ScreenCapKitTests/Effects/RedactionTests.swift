@@ -63,7 +63,7 @@ struct RedactionTests {
     @Test func plainPixelateFillsBlocksWithAverage() throws {
         // Left half black, right half white: a block straddling the edge averages to mid gray.
         let image = try EffectsFixtures.image(width: 20, height: 10, fill: .white) { context in
-            context.setFillColor(EffectsColor.black.cgColor)
+            context.setFillColor(RGBAColor.black.cgColor)
             context.fill(CGRect(x: 0, y: 0, width: 10, height: 10))
         }
         let rect = CGRect(x: 5, y: 0, width: 10, height: 10)

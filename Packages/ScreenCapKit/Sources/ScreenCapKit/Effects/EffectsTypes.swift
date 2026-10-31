@@ -1,5 +1,5 @@
 // Small value types and pixel helpers shared by the Effects module.
-// Local to Effects for now; they will be unified with the Document model later.
+// Colors, shadows, gradient stops, alignment and spotlight shapes come from the Document model.
 import CoreGraphics
 import Foundation
 
@@ -7,29 +7,6 @@ import Foundation
 public enum EffectsError: Error, Equatable {
     case contextCreationFailed
     case imageCreationFailed
-}
-
-/// An sRGB color with straight (non-premultiplied) components in 0...1.
-public struct EffectsColor: Equatable, Sendable {
-    public var red: Double
-    public var green: Double
-    public var blue: Double
-    public var alpha: Double
-
-    public init(red: Double, green: Double, blue: Double, alpha: Double = 1) {
-        self.red = red
-        self.green = green
-        self.blue = blue
-        self.alpha = alpha
-    }
-
-    public static let black = EffectsColor(red: 0, green: 0, blue: 0)
-    public static let white = EffectsColor(red: 1, green: 1, blue: 1)
-
-    var cgColor: CGColor {
-        CGColor(colorSpace: EffectsBitmap.colorSpace, components: [red, green, blue, alpha])
-            ?? CGColor(red: red, green: green, blue: blue, alpha: alpha)
-    }
 }
 
 /// Per-edge distances in image pixels.
@@ -51,27 +28,6 @@ public struct EffectsInsets: Equatable, Sendable {
     }
 
     public static let zero = EffectsInsets(all: 0)
-}
-
-/// A drop shadow. `offset.height` is positive downward (top-left image coordinates).
-public struct EffectsShadow: Equatable, Sendable {
-    public var offset: CGSize
-    public var blur: CGFloat
-    public var opacity: Double
-    public var color: EffectsColor
-
-    public init(offset: CGSize, blur: CGFloat, opacity: Double, color: EffectsColor = .black) {
-        self.offset = offset
-        self.blur = blur
-        self.opacity = opacity
-        self.color = color
-    }
-}
-
-/// A shape in top-left-origin image pixel coordinates.
-public enum EffectsShape: Equatable, Sendable {
-    case rect(CGRect)
-    case ellipse(CGRect)
 }
 
 /// SplitMix64: tiny, fast, seedable PRNG so redaction output is reproducible for a given seed.
@@ -147,7 +103,7 @@ struct EffectsBitmap {
     }
 }
 
-extension EffectsShape {
+extension Annotation.SpotlightShape {
     /// The shape's path in Core Graphics space for a bitmap of the given height.
     func cgPath(in bitmap: EffectsBitmap) -> CGPath {
         switch self {
