@@ -9,10 +9,22 @@ public enum URLSchemeBuilder {
         var components = URLComponents()
         components.scheme = ScreenCapKit.urlScheme
         components.host = command.name
-        let items = queryItems(for: command)
-        components.queryItems = items.isEmpty ? nil : items
-        // Every input is a known-safe host plus encoded query items, so this can't fail.
-        return components.url!
+        let items = queryItems(for: command).map { item in
+            URLQueryItem(name: item.name, value: item.value.map(encode))
+        }
+        components.percentEncodedQueryItems = items.isEmpty ? nil : items
+        // A fixed scheme, a known host and fully encoded query items always form a URL.
+        guard let url = components.url else { preconditionFailure("Unbuildable URL for \(command.name)") }
+        return url
+    }
+
+    /// Query-value characters left unencoded: `URLComponents` keeps `&`, `=` and `+` literal,
+    /// which would split or alter a value, so those are encoded too (`#` and `%` already are).
+    static let valueAllowed = CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&=+#%"))
+
+    /// Percent-encodes a query value so it parses back unchanged.
+    static func encode(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: valueAllowed) ?? value
     }
 
     private static func queryItems(for command: AutomationCommand) -> [URLQueryItem] {

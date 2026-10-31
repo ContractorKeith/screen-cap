@@ -128,11 +128,19 @@ final class URLSchemeRouter {
         let frames = displayFrames()
         if let rect = RegionMapper.globalRect(for: region, displayFrames: frames) { return rect }
         if frames.indices.contains(region.display - 1) {
-            handler.showError("The region doesn't overlap display \(region.display).")
+            handler.showError(Self.outsideDisplayMessage(region, frame: frames[region.display - 1]))
         } else {
             handler.showError("Display \(region.display) not found (\(frames.count) connected).")
         }
         return nil
+    }
+
+    /// HUD text for a region that doesn't lie fully inside its display.
+    static func outsideDisplayMessage(_ region: Region, frame: CGRect) -> String {
+        func num(_ value: Double) -> String { value.formatted(.number.grouping(.never)) }
+        return "The region \(num(region.x)),\(num(region.y)) \(num(region.width))×\(num(region.height)) "
+            + "doesn't fit inside display \(region.display) "
+            + "(\(num(frame.width))×\(num(frame.height)) points)."
     }
 
     private static func fileInfo(_ file: URL?) -> [String: Any] {

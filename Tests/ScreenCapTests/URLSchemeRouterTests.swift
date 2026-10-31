@@ -92,6 +92,19 @@ struct URLSchemeRouterTests {
         #expect(try calls("screencap://capture-area?x=5000&y=0&width=10&height=10") == [.error])
     }
 
+    /// Half off the 1440-pt display: rejected, not clipped to a 40-pt image (#59).
+    @Test func regionPartlyOffTheDisplayIsAnError() throws {
+        let recorder = try run("screencap://capture-area?x=1400&y=0&width=400&height=200&action=save")
+        #expect(recorder.calls == [.error])
+        #expect(recorder.errors.first?.contains("doesn't fit inside display 1 (1440×900 points)") == true)
+        #expect(try calls("screencap://scrolling-capture?x=0&y=800&width=100&height=200") == [.error])
+        #expect(try calls("screencap://capture-text?x=0&y=0&width=1441&height=10") == [.error])
+        #expect(try calls("screencap://all-in-one?x=1900&y=0&width=100&height=100&display=2") == [.error])
+        // Touching the edges exactly is inside.
+        #expect(try calls("screencap://capture-area?x=0&y=0&width=1440&height=900")
+            == [.capture(.area, CGRect(x: 0, y: 0, width: 1440, height: 900), nil)])
+    }
+
     @Test func scrolling() throws {
         #expect(try calls("screencap://scrolling-capture") == [.capture(.scrolling, nil, nil)])
         let recorder = try run("screencap://scrolling-capture?x=200&y=100&width=900&height=700&start=true")
@@ -139,6 +152,10 @@ struct URLSchemeRouterTests {
         #expect(try calls("screencap://open-settings") == [.openSettings(nil)])
         #expect(try calls("screencap://open-settings?tab=advanced") == [.openSettings(.advanced)])
         #expect(try calls("screencap://open-settings?tab=quickaccess") == [.openSettings(.quickAccess)])
+        #expect(try calls("screencap://open-settings?tab=text") == [.openSettings(.text)])
+        let history = try run("screencap://open-settings?tab=history")
+        #expect(history.calls == [.error])
+        #expect(history.errors.first?.contains("Invalid value \"history\" for \"tab\"") == true)
     }
 
     @Test func parseErrorsShowTheirDescription() throws {
@@ -161,6 +178,8 @@ struct URLSchemeRouterTests {
         #expect(RegionMapper.globalRect(for: Region(x: 0, y: 0, width: 1, height: 1, display: 0),
                                         displayFrames: Self.frames) == nil)
         #expect(RegionMapper.globalRect(for: region, displayFrames: []) == nil)
+        let partial = Region(x: 1400, y: 0, width: 400, height: 200)
+        #expect(RegionMapper.globalRect(for: partial, displayFrames: Self.frames) == nil)
     }
 }
 

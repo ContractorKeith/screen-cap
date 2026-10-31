@@ -25,7 +25,7 @@ The parser lives in `Packages/ScreenCapKit/Sources/ScreenCapKit/Automation/`
 
 | Parameter | Values | Notes |
 |---|---|---|
-| `x`, `y` | number ≥ 0 | Points, (0,0) is the **lower-left** corner of the display |
+| `x`, `y` | number ≥ 0 | Points, (0,0) is the **lower-left** corner of the display. The whole region must lie inside the display |
 | `width`, `height` | number > 0 | Points |
 | `display` | integer ≥ 1 | 1-based display index. Default `1`. Only valid with a region |
 | `action` | `copy`, `save`, `annotate`, `pin`, `overlay` | What to do after the capture |
@@ -143,7 +143,11 @@ Opens Settings, optionally on a tab.
 
 | Parameter | Values | Default |
 |---|---|---|
-| `tab` | `general`, `shortcuts`, `quickaccess`, `screenshots`, `annotate`, `wallpaper`, `history`, `advanced`, `about` | last-used tab |
+| `tab` | `general`, `shortcuts`, `quickaccess`, `screenshots`, `scrolling`, `text`, `annotate`, `wallpaper`, `advanced`, `about` | last-used tab |
+
+There is no `history` tab, so `tab=history` is an `invalidParameter` error: history retention is
+under `advanced`, and `open-history` opens the History window. An unknown last-used tab (from an
+older build) opens General.
 
 ```bash
 open "screencap://open-settings?tab=shortcuts"
@@ -154,7 +158,8 @@ open "screencap://open-settings?tab=shortcuts"
 `URLSchemeRouter` (`App/Automation/`) dispatches every parsed command. Region coordinates are
 converted to global AppKit points: display `N` is the `N`th entry of `NSScreen.screens` (display 1
 is the one with the menu bar), and the rect is offset by that display's frame. A display that
-doesn't exist, or a region that misses its display, shows an error.
+doesn't exist, or a region that doesn't lie fully inside its display, shows an error (a region
+that partly misses is rejected, not clipped).
 
 Commands whose feature lives elsewhere are handed over as `NotificationCenter.default` posts
 (file paths as `URL` under `url`, regions as `NSValue` rects in global AppKit points under `rect`):
@@ -163,8 +168,8 @@ Commands whose feature lives elsewhere are handed over as `NotificationCenter.de
 |---|---|
 | `capture-area`, `all-in-one` | Capture coordinator; with a region, captures it directly (All-In-One opens with it pre-selected) |
 | `capture-previous-area`, `capture-fullscreen`, `capture-window`, `self-timer` | Capture coordinator |
-| `scrolling-capture` | No region: coordinator scrolling flow. Region: `.scrollingCaptureRequested` with `rect`, `start`, `autoscroll` (Bool) |
-| `capture-text` | Neither: coordinator text flow. File: `.captureTextRequested` with `url`, `lineBreaks`. Region: same with `rect`, `lineBreaks` |
+| `scrolling-capture` | No region: coordinator scrolling flow. Region: `.scrollingCaptureRequested` with `rect`, `start`, `autoscroll` (Bool); `ScrollingCaptureController` starts a scrolling capture of that region (`autoscroll` overrides the Auto-scroll setting) |
+| `capture-text` | Neither: coordinator text flow. File: `.captureTextRequested` with `url`, `lineBreaks`. Region: same with `rect`, `lineBreaks`. `TextCaptureController` runs OCR and copies the text; `lineBreaks` overrides the Keep Line Breaks setting |
 | `open-annotate` | `.openAnnotateRequested` with `url` (no `url` key = ask for a file) |
 | `pin` | `.pinRequested` with `url` (no `url` key = ask for a file) |
 | `add-quick-access-overlay` | `.addQuickAccessOverlayRequested` with `url` |
@@ -174,7 +179,7 @@ Commands whose feature lives elsewhere are handed over as `NotificationCenter.de
 | `toggle-/hide-/show-desktop-icons` | `DesktopIconsController` |
 | `open-settings` | Settings window on `tab`, or the last-used tab |
 
-Errors (parse errors and missing displays) show a small HUD at the top of the screen for five
+Errors (parse errors, missing displays and regions outside their display) show a small HUD at the top of the screen for five
 seconds and are logged; nothing blocks a script.
 
 ## Errors
