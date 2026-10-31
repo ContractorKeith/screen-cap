@@ -149,6 +149,34 @@ Opens Settings, optionally on a tab.
 open "screencap://open-settings?tab=shortcuts"
 ```
 
+## How the app runs each command
+
+`URLSchemeRouter` (`App/Automation/`) dispatches every parsed command. Region coordinates are
+converted to global AppKit points: display `N` is the `N`th entry of `NSScreen.screens` (display 1
+is the one with the menu bar), and the rect is offset by that display's frame. A display that
+doesn't exist, or a region that misses its display, shows an error.
+
+Commands whose feature lives elsewhere are handed over as `NotificationCenter.default` posts
+(file paths as `URL` under `url`, regions as `NSValue` rects in global AppKit points under `rect`):
+
+| Command | Runs |
+|---|---|
+| `capture-area`, `all-in-one` | Capture coordinator; with a region, captures it directly (All-In-One opens with it pre-selected) |
+| `capture-previous-area`, `capture-fullscreen`, `capture-window`, `self-timer` | Capture coordinator |
+| `scrolling-capture` | No region: coordinator scrolling flow. Region: `.scrollingCaptureRequested` with `rect`, `start`, `autoscroll` (Bool) |
+| `capture-text` | Neither: coordinator text flow. File: `.captureTextRequested` with `url`, `lineBreaks`. Region: same with `rect`, `lineBreaks` |
+| `open-annotate` | `.openAnnotateRequested` with `url` (no `url` key = ask for a file) |
+| `pin` | `.pinRequested` with `url` (no `url` key = ask for a file) |
+| `add-quick-access-overlay` | `.addQuickAccessOverlayRequested` with `url` |
+| `open-from-clipboard` | Writes the clipboard image to a temp PNG, then `.openAnnotateRequested` with `url`; error if the clipboard has no image |
+| `open-history` | `.openHistoryRequested` (the History window) |
+| `restore-recently-closed` | `.restoreRecentlyClosedRequested` (no userInfo) |
+| `toggle-/hide-/show-desktop-icons` | `DesktopIconsController` |
+| `open-settings` | Settings window on `tab`, or the last-used tab |
+
+Errors (parse errors and missing displays) show a small HUD at the top of the screen for five
+seconds and are logged; nothing blocks a script.
+
 ## Errors
 
 Parsing fails with one of these (`URLSchemeParser.ParseError`):

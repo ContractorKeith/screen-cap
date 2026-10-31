@@ -7,11 +7,6 @@ import ScreenCapKit
 /// puts it back where it was.
 @MainActor
 final class PinController: CaptureSink {
-    /// Pin an existing capture. userInfo: `result` (CaptureResult) or `url` (image file URL).
-    static let pinRequested = Notification.Name("ScreenCapPinRequested")
-    /// Open a capture in the editor. userInfo: `result` (CaptureResult).
-    static let openAnnotateRequested = Notification.Name("ScreenCapOpenAnnotateRequested")
-
     private let output: CaptureOutput
     private var pins: [(panel: PinPanel, result: CaptureResult)] = []
     private var sessionFrames: [UUID: NSRect] = [:]
@@ -26,7 +21,7 @@ final class PinController: CaptureSink {
     /// Starts observing `pinRequested`.
     func install() {
         observer = NotificationCenter.default.addObserver(
-            forName: Self.pinRequested, object: nil, queue: .main
+            forName: Notification.Name.pinRequested, object: nil, queue: .main
         ) { [weak self] note in
             let result = note.userInfo?["result"] as? CaptureResult
             let url = note.userInfo?["url"] as? URL
@@ -134,7 +129,7 @@ final class PinController: CaptureSink {
                 }
             }
         case .annotate:
-            NotificationCenter.default.post(name: Self.openAnnotateRequested, object: self,
+            NotificationCenter.default.post(name: Notification.Name.openAnnotateRequested, object: self,
                                             userInfo: ["result": result])
         case .toggleLock:
             panel.apply(.toggleLock)

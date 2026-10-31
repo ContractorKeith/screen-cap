@@ -4,7 +4,8 @@ import ScreenCapKit
 /// Owns the capture flow: permission check, overlays, the capture itself, then the
 /// after-capture action and the history write.
 ///
-/// Shortcuts, menu items, `--capture` and (later) the URL scheme all call `capture(_:action:)`.
+/// Shortcuts, menu items, `--capture` and the URL scheme all call `capture(_:action:)`;
+/// URL regions use `capture(_:rect:action:)`.
 @MainActor
 final class CaptureCoordinator {
     /// Receives `.overlay`, `.annotate` and `.pin` results. Quick Access replaces the default.
@@ -14,6 +15,8 @@ final class CaptureCoordinator {
     let service: CaptureService
     let previousArea: PreviousArea
     let selfTimer = SelfTimer()
+    /// Covers desktop icons during captures when "Hide desktop icons while capturing" is on.
+    var desktopIcons: DesktopIconsController?
     /// Runs scrolling capture over a selected region (App/Scrolling); it delivers through `deliver`.
     /// Nil posts `.scrollingCaptureRequested` instead.
     var scrollingHandler: (@MainActor (CGRect, FilenameTemplate.Context, AfterCaptureAction?) async -> Void)?
@@ -56,6 +59,15 @@ final class CaptureCoordinator {
         start(kind.rawValue) { coordinator in try await coordinator.run(kind, action: action) }
     }
 
+    /// Captures a known rect in global AppKit points without the selection overlay
+    /// (All-In-One opens with the rect pre-selected).
+    @discardableResult
+    func capture(_ kind: CaptureKind, rect: CGRect, action: AfterCaptureAction? = nil) -> Task<Void, Never>? {
+        start("\(kind.rawValue) at \(rect)") { coordinator in
+            try await coordinator.run(kind, rect: rect, action: action)
+        }
+    }
+
     /// Captures an app's frontmost window without the picker. Used by `--capture window --window <app>`.
     @discardableResult
     func captureWindow(ofApp app: String, action: AfterCaptureAction? = nil) -> Task<Void, Never>? {
@@ -73,12 +85,16 @@ final class CaptureCoordinator {
         guard current == nil else { return nil }
         let task = Task { [weak self] in
             guard let self else { return }
+            let coverIcons = settings.hideDesktopIcons && desktopIcons?.beginTemporaryHide() == true
             do {
+                // Let the window server draw the covers before the first still is taken.
+                if coverIcons { try await Task.sleep(for: Self.overlayHideDelay) }
                 try await body(self)
             } catch {
                 let reason = String(describing: error)
                 appLog.error("Capture \(label, privacy: .public) failed: \(reason, privacy: .public)")
             }
+            if coverIcons { desktopIcons?.endTemporaryHide() }
             self.current = nil
         }
         current = task

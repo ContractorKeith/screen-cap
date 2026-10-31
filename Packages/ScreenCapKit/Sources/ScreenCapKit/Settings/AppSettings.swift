@@ -13,6 +13,7 @@ public final class AppSettings {
         case hideDesktopIcons, launchAtLogin, lastCaptureRect, colorPalette
         case ocrKeepLineBreaks, ocrLanguages
         case windowShadow, fullscreenAllDisplays, selfTimerSeconds
+        case wallpaper, historyRetentionDays
     }
 
     /// Default values, shared with tests.
@@ -38,6 +39,8 @@ public final class AppSettings {
         public static let selfTimerSeconds = 5
         /// Countdown lengths offered in the menu and settings.
         public static let selfTimerChoices = [3, 5, 10]
+        public static let wallpaper = WallpaperOptions()
+        public static let historyRetentionDays = HistoryStore.defaultRetentionDays
     }
 
     @ObservationIgnored private let store: any SettingsStore
@@ -72,6 +75,10 @@ public final class AppSettings {
     public var fullscreenAllDisplays: Bool { didSet { persist(.fullscreenAllDisplays, fullscreenAllDisplays) } }
     /// Self-timer countdown in seconds.
     public var selfTimerSeconds: Int { didSet { persist(.selfTimerSeconds, selfTimerSeconds) } }
+    /// Background for "window with background" captures.
+    public var wallpaper: WallpaperOptions { didSet { persist(.wallpaper, wallpaper) } }
+    /// Days of capture history to keep; older captures are purged.
+    public var historyRetentionDays: Int { didSet { persist(.historyRetentionDays, historyRetentionDays) } }
 
     public init(store: any SettingsStore = UserDefaultsSettingsStore()) {
         self.store = store
@@ -95,6 +102,8 @@ public final class AppSettings {
         windowShadow = Self.load(.windowShadow, from: store) ?? true
         fullscreenAllDisplays = Self.load(.fullscreenAllDisplays, from: store) ?? false
         selfTimerSeconds = Self.load(.selfTimerSeconds, from: store) ?? Defaults.selfTimerSeconds
+        wallpaper = Self.load(.wallpaper, from: store) ?? Defaults.wallpaper
+        historyRetentionDays = Self.load(.historyRetentionDays, from: store) ?? Defaults.historyRetentionDays
     }
 
     /// After-capture action for a shortcut, falling back to the default.
@@ -115,6 +124,32 @@ public final class AppSettings {
             folder: saveFolder,
             filenameTemplate: filenameTemplate
         )
+    }
+
+    /// Puts every setting back to its default. Launch at Login is left alone (the system owns it).
+    public func resetToDefaults() {
+        let fresh = AppSettings(store: InMemorySettingsStore())
+        saveFolder = fresh.saveFolder
+        filenameTemplate = fresh.filenameTemplate
+        imageFormat = fresh.imageFormat
+        retinaScale = fresh.retinaScale
+        jpegQuality = fresh.jpegQuality
+        copyMode = fresh.copyMode
+        afterCaptureActions = fresh.afterCaptureActions
+        freezeScreen = fresh.freezeScreen
+        showCrosshair = fresh.showCrosshair
+        showMagnifier = fresh.showMagnifier
+        quickAccess = fresh.quickAccess
+        hideDesktopIcons = fresh.hideDesktopIcons
+        lastCaptureRect = fresh.lastCaptureRect
+        colorPalette = fresh.colorPalette
+        ocrKeepLineBreaks = fresh.ocrKeepLineBreaks
+        ocrLanguages = fresh.ocrLanguages
+        windowShadow = fresh.windowShadow
+        fullscreenAllDisplays = fresh.fullscreenAllDisplays
+        selfTimerSeconds = fresh.selfTimerSeconds
+        wallpaper = fresh.wallpaper
+        historyRetentionDays = fresh.historyRetentionDays
     }
 
     // MARK: - Persistence

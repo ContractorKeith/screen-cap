@@ -10,6 +10,9 @@ enum AppMenu {
         var selfTimer: @MainActor (Int) -> Void
         var selfTimerSeconds: @MainActor () -> Int
         var openSettings: @MainActor () -> Void
+        var openHistory: @MainActor () -> Void
+        var toggleDesktopIcons: @MainActor () -> Void
+        var desktopIconsHidden: @MainActor () -> Bool
         var openOnboarding: @MainActor () -> Void
         var toggleLaunchAtLogin: @MainActor () -> Void
         var launchAtLoginIsOn: @MainActor () -> Bool
@@ -36,6 +39,10 @@ enum AppMenu {
             .item(MenuAction("Hide Overlays", shortcut: .toggleOverlays, isOn: { QuickAccessVisibility.isHidden },
                              perform: post(.toggleOverlaysRequested))),
             .item(MenuAction("Restore Recently Closed", perform: post(.restoreRecentlyClosedRequested))),
+            .separator,
+            .item(MenuAction("History…", shortcut: .openHistory, perform: actions.openHistory)),
+            .item(MenuAction("Hide Desktop Icons", isOn: actions.desktopIconsHidden,
+                             perform: actions.toggleDesktopIcons)),
             .separator,
             .item(MenuAction("Screen Recording Permission…", perform: actions.openOnboarding)),
             .item(MenuAction("Launch at Login", isOn: actions.launchAtLoginIsOn, perform: actions.toggleLaunchAtLogin)),
