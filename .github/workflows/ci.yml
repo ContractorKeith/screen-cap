@@ -20,16 +20,6 @@ jobs:
           swift --version
       - name: Build
         run: swift build
-      - name: Test (redaction tests, diagnostic)
-        timeout-minutes: 14
-        run: |
-          swift build --build-tests
-          for t in visionReadsUnredactedFixture pixelateIsDeterministicPerSeed pixelateLeavesPixelsOutsideRectUntouched plainPixelateFillsBlocksWithAverage smoothBlurChangesOnlyTheRect randomizedPixelateDefeatsOCR secureBlurDefeatsOCR; do
-            echo "::group::$t"
-            perl -e 'alarm 75; system(@ARGV); exit(($? >> 8) || ($? & 127))' swift test --skip-build --filter "ScreenCapKitTests.RedactionTests/$t" > "/tmp/$t.log" 2>&1 && echo "$t: OK" || echo "$t: FAILED OR TIMED OUT (exit $?)"
-            tail -5 "/tmp/$t.log" || true
-            echo "::endgroup::"
-          done
       - name: Test
         timeout-minutes: 15
         run: swift test

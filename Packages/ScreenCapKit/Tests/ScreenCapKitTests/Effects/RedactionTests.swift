@@ -3,7 +3,8 @@ import Foundation
 @testable import ScreenCapKit
 import Testing
 
-@Suite("Redaction")
+// Serialized: concurrent Vision + Core Image requests deadlock on GitHub's paravirtualized macOS runners.
+@Suite("Redaction", .serialized)
 struct RedactionTests {
     static let text = "Secret payroll password hunter"
     static let words = Set(text.lowercased().split(separator: " ").map(String.init))
