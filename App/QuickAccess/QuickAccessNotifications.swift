@@ -3,12 +3,19 @@ import Foundation
 // Shared notification names (openAnnotateRequested, pinRequested, restoreRecentlyClosedRequested)
 // live in App/Automation/AutomationNotifications.swift.
 
+extension Notification.Name {
+    /// A history record changed outside the History window (restored, OCR text added); it reloads.
+    static let historyRecordsChanged = Notification.Name("ScreenCapHistoryRecordsChanged")
+}
+
 /// userInfo keys used on the notifications above and on `.captureTextRequested` from Quick Access,
-/// which carries `image` (CGImage) and `result` instead of a screen `rect`.
+/// which carries `image` (CGImage), `result` and `recordID` (the history record, so OCR text lands
+/// in history) instead of a screen `rect`.
 enum QuickAccessUserInfo {
     static let result = "result"
     static let fileURL = "fileURL"
     static let image = "image"
+    static let recordID = "recordID"
 }
 
 /// Quick Access preferences that aren't part of `AppSettings.quickAccess`.

@@ -91,13 +91,15 @@ struct HistoryViewModelTests {
 
         model.selection = [kept.id]
         #expect(model.canRestore)
-        let restored = await model.restore([kept.id])
-        #expect(restored.map(\.id) == [kept.id])
+        #expect(model.restorable([kept.id, old.id]).map(\.id) == [kept.id])
+        // Quick Access clears closedAt only after the panel is shown (#41).
+        #expect(await store.recentlyClosed().map(\.id) == [kept.id])
+        try await store.restore(id: kept.id)
+        await model.reload()
         #expect(!model.canRestore)
 
         await model.purge()
         #expect(model.records.map(\.id) == [kept.id])
-        _ = old
 
         await model.delete([kept.id])
         #expect(model.records.isEmpty)

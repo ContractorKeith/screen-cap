@@ -1,5 +1,4 @@
 import AppKit
-import ImageIO
 import ScreenCapKit
 
 /// Quick Access overlay (PLAN §3.2): a stack of floating thumbnails in a screen corner.
@@ -27,6 +26,10 @@ final class QuickAccessController: CaptureSink {
         observe(.toggleOverlaysRequested) { $0.toggleHidden() }
         observe(.restoreRecentlyClosedRequested) { $0.restoreRecentlyClosed() }
         observe(NSApplication.didChangeScreenParametersNotification) { $0.layout() }
+        observe(.addQuickAccessOverlayRequested) { controller, info in
+            controller.showRequested(url: info?[AutomationKey.url] as? URL,
+                                     recordID: info?[AutomationKey.recordID] as? UUID)
+        }
     }
 
     func deliver(_ result: CaptureResult, action: AfterCaptureAction) async {
@@ -146,14 +149,25 @@ final class QuickAccessController: CaptureSink {
                 appLog.notice("Nothing recently closed to restore")
                 return
             }
-            do {
-                let record = try await history.restore(id: closed.id)
-                guard let source = CGImageSourceCreateWithURL(record.fileURL as CFURL, nil),
-                      let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return }
-                show(QuickAccessItem.result(from: record, image: image))
-            } catch {
-                appLog.error("Restore failed: \(error.localizedDescription, privacy: .public)")
+            showRequested(url: nil, recordID: closed.id)
+        }
+    }
+
+    /// Shows a file or history record (URL scheme, History → Restore). The record only leaves
+    /// Restore Recently Closed once its panel is actually on screen.
+    func showRequested(url: URL?, recordID: UUID?) {
+        Task {
+            guard let result = await QuickAccessSource.result(url: url, recordID: recordID, history: history) else {
+                let name = url?.path ?? recordID?.uuidString ?? "nothing"
+                appLog.error("Quick Access couldn't open \(name, privacy: .public)")
+                HUDPanel.show("Couldn't open image")
+                return
             }
+            show(result)
+            if let id = result.historyRecordID, let history {
+                _ = try? await history.restore(id: id)
+            }
+            NotificationCenter.default.post(name: .historyRecordsChanged, object: nil)
         }
     }
 
@@ -179,10 +193,17 @@ final class QuickAccessController: CaptureSink {
     }
 
     private func observe(_ name: Notification.Name, _ handler: @escaping @MainActor (QuickAccessController) -> Void) {
-        NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        observe(name) { controller, _ in handler(controller) }
+    }
+
+    private func observe(_ name: Notification.Name,
+                         _ handler: @escaping @MainActor (QuickAccessController, [AnyHashable: Any]?) -> Void) {
+        NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+            // userInfo isn't Sendable; the queue is main, so it never leaves this thread.
+            nonisolated(unsafe) let info = note.userInfo
             MainActor.assumeIsolated {
                 guard let self else { return }
-                handler(self)
+                handler(self, info)
             }
         }
     }

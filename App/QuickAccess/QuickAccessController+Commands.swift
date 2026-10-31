@@ -115,9 +115,11 @@ extension QuickAccessController {
     }
 
     private func requestText(_ item: QuickAccessItem) {
-        NotificationCenter.default.post(name: .captureTextRequested, object: nil, userInfo: [
+        var info: [String: Any] = [
             QuickAccessUserInfo.image: item.result.image.cgImage,
             QuickAccessUserInfo.result: item.result
-        ])
+        ]
+        if let id = item.result.historyRecordID { info[QuickAccessUserInfo.recordID] = id }
+        NotificationCenter.default.post(name: .captureTextRequested, object: nil, userInfo: info)
     }
 }
