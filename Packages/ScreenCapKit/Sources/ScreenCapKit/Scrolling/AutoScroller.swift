@@ -31,6 +31,11 @@ public struct SystemScrollEventPoster: ScrollEventPosting {
 }
 
 /// When auto-scroll should stop, given stitcher outcomes. Pure, so it is unit-tested.
+///
+/// The end of the content needs real evidence: consecutive frames where the content didn't move
+/// (`frameChanged: false`: byte-identical, or found in place). A frame whose content changed is
+/// progress even when the stitcher could not place it (repeating rows), so it never counts toward
+/// the end (#98).
 public struct AutoScrollStopRule: Equatable, Sendable {
     /// Consecutive still frames that mean the end of the content was reached.
     public var noMovementLimit: Int
@@ -40,15 +45,24 @@ public struct AutoScrollStopRule: Equatable, Sendable {
         self.noMovementLimit = noMovementLimit
     }
 
-    /// Feeds one outcome; returns a reason when scrolling should stop.
-    public mutating func record(_ outcome: Stitcher.AppendOutcome) -> AutoScroller.StopReason? {
+    /// Feeds one outcome; returns a reason when scrolling should stop. `frameChanged` says whether
+    /// the content moved since the previous frame; nil falls back to the outcome alone.
+    public mutating func record(_ outcome: Stitcher.AppendOutcome,
+                                frameChanged: Bool? = nil) -> AutoScroller.StopReason? {
+        if outcome == .maxLengthReached { return .maxLengthReached }
+        if let frameChanged {
+            guard !frameChanged, outcome != .started else {
+                stillFrames = 0
+                return nil
+            }
+            stillFrames += 1
+            return stillFrames >= noMovementLimit ? .endReached : nil
+        }
         switch outcome {
         case .noMovement:
             stillFrames += 1
             return stillFrames >= noMovementLimit ? .endReached : nil
-        case .maxLengthReached:
-            return .maxLengthReached
-        case .started, .appended, .gapDetected:
+        case .started, .appended, .gapDetected, .maxLengthReached:
             stillFrames = 0
             return nil
         case .unrelated, .ambiguous:
@@ -57,11 +71,12 @@ public struct AutoScrollStopRule: Equatable, Sendable {
     }
 }
 
-/// Scrolls a region step by step while the capture pipeline feeds frames to a `Stitcher`.
+/// Scrolls a region one step at a time, in lockstep with the frames.
 ///
-/// The caller grabs a frame after each step, appends it to the stitcher and passes the
-/// outcome to `record(_:)`. Scrolling stops at the end of the content, at the length cap or
-/// on `cancel()`.
+/// `start(at:)` only arms it: nothing is posted until the caller has captured a frame and calls
+/// `advance()`, so the first frame always shows the region as the user left it (#98). Each frame
+/// is followed by one step, so the distance posted per frame is known. Scrolling stops at the
+/// end of the content, at the length cap or on `cancel()`.
 @MainActor
 public final class AutoScroller {
     public enum StopReason: Equatable, Sendable {
@@ -80,25 +95,23 @@ public final class AutoScroller {
 
     public private(set) var state: State = .idle
     public let axis: ScrollAxis
-    /// Pixels per scroll step. Keep well under the region length so frames overlap.
+    /// Points per scroll step. Keep well under the region length so frames overlap.
     public let step: Int
-    public let interval: Duration
     private let poster: any ScrollEventPosting
     private var rule = AutoScrollStopRule()
-    private var task: Task<Void, Never>?
+    private var point = CGPoint.zero
     /// Points posted since the last `takePostedDistance()`.
     private var posted = 0
 
-    public init(axis: ScrollAxis = .vertical, step: Int = 120, interval: Duration = .milliseconds(150),
+    public init(axis: ScrollAxis = .vertical, step: Int = 120,
                 poster: any ScrollEventPosting = SystemScrollEventPoster()) {
         self.axis = axis
         self.step = step
-        self.interval = interval
         self.poster = poster
     }
 
-    /// Starts posting scroll events at `point`. Reports `.needsAccessibility` without posting
-    /// if the app is not trusted.
+    /// Arms auto-scroll at `point` without posting anything. Reports `.needsAccessibility` if the
+    /// app is not trusted.
     @discardableResult
     public func start(at point: CGPoint) -> State {
         guard state != .scrolling else { return state }
@@ -108,39 +121,40 @@ public final class AutoScroller {
         }
         rule = AutoScrollStopRule()
         posted = 0
+        self.point = point
         state = .scrolling
-        task = Task { [weak self] in
-            while let self, self.state == .scrolling, !Task.isCancelled {
-                self.poster.postScroll(at: point, axis: self.axis, delta: self.step)
-                self.posted += self.step
-                try? await Task.sleep(for: self.interval)
-            }
-        }
         return state
     }
 
-    /// Points scrolled since the last call. The frame timer and the scroll timer drift, so a
-    /// frame can see zero, one or two steps; this tells the stitcher which.
+    /// Posts one step toward the end of the content. Call after each frame is captured.
+    public func advance() {
+        guard state == .scrolling else { return }
+        poster.postScroll(at: point, axis: axis, delta: step)
+        posted += step
+    }
+
+    /// Posts `delta` points without counting them as progress: an end-of-content probe scrolls
+    /// back one step and returns, which cancels out.
+    public func nudge(by delta: Int) {
+        guard state == .scrolling else { return }
+        poster.postScroll(at: point, axis: axis, delta: delta)
+    }
+
+    /// Points scrolled forward since the last call.
     public func takePostedDistance() -> Int {
         defer { posted = 0 }
         return posted
     }
 
     /// Feeds a stitcher outcome; stops scrolling when a stop condition is met.
-    public func record(_ outcome: Stitcher.AppendOutcome) {
-        guard state == .scrolling, let reason = rule.record(outcome) else { return }
-        stop(reason)
+    public func record(_ outcome: Stitcher.AppendOutcome, frameChanged: Bool? = nil) {
+        guard state == .scrolling, let reason = rule.record(outcome, frameChanged: frameChanged) else { return }
+        state = .stopped(reason)
     }
 
     /// Stops scrolling (Esc).
     public func cancel() {
         guard state == .scrolling else { return }
-        stop(.cancelled)
-    }
-
-    private func stop(_ reason: StopReason) {
-        state = .stopped(reason)
-        task?.cancel()
-        task = nil
+        state = .stopped(.cancelled)
     }
 }

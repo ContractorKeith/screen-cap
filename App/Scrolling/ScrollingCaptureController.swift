@@ -99,32 +99,35 @@ final class ScrollingCaptureController {
         // Keep at least half the region overlapping between steps so frames always align.
         let step = max(10, min(settings.scrollStep, Int(regionLength / 2)))
         let interval = settings.frameInterval
-        let scroller = AutoScroller(axis: axis, step: step, interval: interval, poster: poster)
+        let scroller = AutoScroller(axis: axis, step: step, poster: poster)
         defer { scroller.cancel() }
 
         let collector = ScrollingFrameCollector(source: frameSource, region: region, axis: axis,
                                                 maxLength: settings.maxLength)
+        // Capture first, then scroll (#98); the probe waits at least 100 ms for the page to redraw.
+        let loop = ScrollingFrameLoop(collector: collector, scroller: scroller,
+                                      settle: max(interval, .milliseconds(100)))
         var lastPreview = ContinuousClock.now - .seconds(1)
         let clock = ContinuousClock()
         while session.isCapturing {
             let tick = clock.now
-            syncScroller(scroller, at: scrollPoint)
-            // While auto-scrolling, the distance posted since the last frame (points) tells the
-            // stitcher how far content moved; it only breaks ties on repeating content.
-            let posted = scroller.state == .scrolling ? scroller.takePostedDistance() : 0
-            let outcome = await collector.grab { scale in
-                posted > 0 ? Int((CGFloat(posted) * scale).rounded()) : nil
+            syncScroller(scroller, at: scrollPoint) // arms auto-scroll; posts nothing yet
+            let frame = await loop.next { [self] frame in
+                // Cancel/Stop while appending ends the loop without recording.
+                guard session.isCapturing else { return false }
+                session.record(frame.outcome, frameChanged: frame.changed)
+                return session.isCapturing
             }
-            guard let outcome else {
+            guard let frame else {
                 let detail = collector.failure.map { String(describing: $0) } ?? "unknown"
                 appLog.error("Scrolling frame failed: \(detail, privacy: .public)")
                 session.fail()
                 break
             }
-            guard session.isCapturing else { break } // Cancel/Stop while appending
-            session.record(outcome)
+            let outcome = String(describing: frame.outcome)
+            appLog.debug("Scrolling frame: \(outcome, privacy: .public), changed \(frame.changed)")
             if let stitcher = collector.stitcher {
-                lastPreview = await present(outcome, from: stitcher, lastPreview: lastPreview)
+                lastPreview = await present(frame.outcome, from: stitcher, lastPreview: lastPreview)
             }
             syncModel()
             try? await Task.sleep(until: tick + interval, clock: clock)
@@ -294,7 +297,7 @@ extension ScrollingCaptureController {
             appLog.error("Scrolling capture failed: \(problem, privacy: .public)")
             coordinator.record(.failed(problem))
             CaptureHUD.show("Scrolling capture failed", detail: problem)
-        case let .image(image, problem, gapAtEnd):
+        case let .image(image, problem, gapMarked):
             session.delivered(hasImage: true)
             await coordinator.deliver(image, kind: .scrolling, context: context, action: action)
             if let problem {
@@ -302,9 +305,10 @@ extension ScrollingCaptureController {
                 coordinator.record(.failed(problem))
                 CaptureHUD.show("Scrolling capture stopped early",
                                 detail: "\(problem) What was stitched so far was kept.")
-            } else if gapAtEnd {
-                CaptureHUD.show("Gap marked at the end of the capture",
-                                detail: "The last screen didn't line up with the rest; a dashed line marks the gap.")
+            } else if gapMarked {
+                CaptureHUD.show("Gap marked in the capture",
+                                detail: "Some screens didn't line up (repeating rows or a fast scroll); "
+                                    + "a dashed line marks each gap.")
             }
         }
     }
