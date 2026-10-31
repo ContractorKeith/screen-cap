@@ -18,6 +18,13 @@ cp "$BIN_DIR/ScreenCap" "$CONTENTS/MacOS/ScreenCap"
 # Sparkle ships as a dynamic framework; embed it (ditto keeps its symlinks) and point the rpath at it.
 ditto "$BIN_DIR/Sparkle.framework" "$CONTENTS/Frameworks/Sparkle.framework"
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$CONTENTS/MacOS/ScreenCap"
+# SwiftPM resource bundles (KeyboardShortcuts' localizations, #92). codesign forbids the app root, where
+# the generated Bundle.module looks, so they go in Resources; App/ResourceBundles.swift redirects there.
+shopt -s nullglob
+for res in "$BIN_DIR"/*.bundle; do
+  ditto "$res" "$CONTENTS/Resources/$(basename "$res")"
+done
+shopt -u nullglob
 cp App/Resources/Info.plist "$CONTENTS/Info.plist"
 # CFBundleVersion is the build number Sparkle compares (sparkle:version), so it must increase every
 # release: the git commit count. CFBundleShortVersionString comes from ScreenCapKit.version.
@@ -46,5 +53,5 @@ else
   codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
 fi
 codesign --verify --verbose=1 "$APP"
-scripts/check-bundle.sh "$APP"
+scripts/check-bundle.sh "$APP" "$BIN_DIR"
 echo "Built $ROOT/$APP"
