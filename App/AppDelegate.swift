@@ -94,6 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Each UI feature creates its controller here and assigns itself on `sinkRouter`
     /// (overlay, annotate, pin). Keep one line per feature so parallel PRs merge cleanly.
     private func installFeatures() {
+        sinkRouter.overlay = QuickAccessController(settings: settings, output: coordinator.output,
+                                                   history: coordinator.history, router: sinkRouter)
     }
 
     private static func openHistory() -> HistoryStore? {
