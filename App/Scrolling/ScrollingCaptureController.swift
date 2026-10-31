@@ -16,10 +16,12 @@ final class ScrollingCaptureController {
     private var session = ScrollingSession()
     private let model = ScrollingPanelModel()
     private var panels: [NSPanel] = []
-    private weak var controlPanel: NSPanel?
+    weak var controlPanel: NSPanel?
     private let previewView = ScrollingPreviewView()
     private var keyMonitors: [Any] = []
     private var wake: CheckedContinuation<Void, Never>?
+    /// When the gap hint, if shown, goes away.
+    private var hintUntil: ContinuousClock.Instant?
     /// `--region` or a URL with `start=true` starts the next capture without waiting for Start.
     private var startsImmediately = false
     /// Auto-scroll for the next capture from a URL (`autoscroll=`); nil uses the launch option or setting.
@@ -116,15 +118,13 @@ final class ScrollingCaptureController {
                                                maxLength: Int(CGFloat(settings.maxLength) * frame.scale))
             stitcher = active
             lastFrame = frame
+            // While auto-scrolling, the posted step (points) tells the stitcher how far content moves.
+            let expected = scroller.state == .scrolling ? Int((CGFloat(step) * frame.scale).rounded()) : nil
+            await active.setExpectedStep(expected)
             let outcome = await active.append(frame: frame.cgImage)
             guard session.isCapturing else { break } // Cancel/Stop while appending
             session.record(outcome)
-            switch outcome {
-            case .started, .appended, .maxLengthReached:
-                lastPreview = await refreshPreview(active, last: lastPreview, force: !session.isCapturing)
-            case .noMovement, .unrelated:
-                break
-            }
+            lastPreview = await present(outcome, from: active, lastPreview: lastPreview)
             syncModel()
             try? await Task.sleep(until: tick + interval, clock: clock)
         }
@@ -136,6 +136,27 @@ final class ScrollingCaptureController {
         let origin = CGPoint(x: region.minX, y: region.maxY - size.height)
         return CapturedImage(cgImage: image, scale: scale, pointRect: CGRect(origin: origin, size: size),
                              displayID: lastFrame.displayID)
+    }
+
+    /// Refreshes the preview after progress and shows the gap hint for a few seconds after a jump.
+    private func present(_ outcome: Stitcher.AppendOutcome, from stitcher: Stitcher,
+                         lastPreview: ContinuousClock.Instant) async -> ContinuousClock.Instant {
+        let now = ContinuousClock.now
+        if let until = hintUntil, now >= until {
+            model.hint = nil
+            hintUntil = nil
+        }
+        switch outcome {
+        case .started, .appended, .maxLengthReached:
+            return await refreshPreview(stitcher, last: lastPreview, force: !session.isCapturing)
+        case .gapDetected:
+            appLog.info("Scrolling capture: content jumped; gap marked")
+            model.hint = ScrollingPanelModel.gapHint
+            hintUntil = now + .seconds(4)
+            return await refreshPreview(stitcher, last: lastPreview, force: true)
+        case .noMovement, .unrelated:
+            return lastPreview
+        }
     }
 
     /// Composing copies the whole canvas, so refresh less often as the image grows.
@@ -195,35 +216,6 @@ final class ScrollingCaptureController {
         model.horizontal = session.axis == .horizontal
     }
 
-    private func showAccessibilitySheet() {
-        let alert = NSAlert()
-        alert.messageText = "Auto-scroll needs Accessibility access"
-        alert.informativeText = """
-            ScreenCap scrolls the page for you by sending scroll events, which macOS allows only for apps \
-            with Accessibility access. Turn on ScreenCap in System Settings → Privacy & Security → \
-            Accessibility, then start a new scrolling capture. This capture continues manually: scroll the \
-            region yourself.
-            """
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Continue Manually")
-        let handle: (NSApplication.ModalResponse) -> Void = { response in
-            guard response == .alertFirstButtonReturn else { return }
-            // Registers the app in the Accessibility list so the user only has to flip the switch.
-            let prompt = "AXTrustedCheckOptionPrompt" as CFString
-            _ = AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary)
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-                NSWorkspace.shared.open(url)
-            }
-        }
-        if let controlPanel {
-            alert.beginSheetModal(for: controlPanel, completionHandler: handle)
-        } else {
-            handle(alert.runModal())
-        }
-    }
-
-    // MARK: - Panels
-
     private func showUI(around region: CGRect) {
         bindModel()
         let screen = NSScreen.screens.first { $0.frame.intersects(region) }?.visibleFrame
@@ -239,6 +231,9 @@ final class ScrollingCaptureController {
         let preview = ScrollingPanel(frame: layout.preview, titled: true)
         preview.contentView = previewView
         previewView.image = nil
+        model.hint = nil
+        hintUntil = nil
+        model.capturedSize = .zero
 
         panels = [border, preview, control]
         controlPanel = control

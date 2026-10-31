@@ -12,6 +12,10 @@ final class ScrollingPanelModel {
     var horizontal = false
     /// Stitched size in pixels, for the readout.
     var capturedSize = CGSize.zero
+    /// A short warning shown in place of the readout (e.g. after a gap), or nil.
+    var hint: String?
+
+    static let gapHint = "Scrolled too fast: a gap is marked. Scroll slower."
 
     @ObservationIgnored var onStart: () -> Void = {}
     @ObservationIgnored var onStop: () -> Void = {}
@@ -36,9 +40,17 @@ struct ScrollingControlView: View {
                 .disabled(model.phase == .finishing)
             Toggle("Horizontal", isOn: Binding(get: { model.horizontal }, set: { model.onHorizontal($0) }))
                 .disabled(model.phase != .selecting)
-            Text(model.readout)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+            if let hint = model.hint {
+                Text(hint)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(model.readout)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
             HStack {
                 Button("Cancel", role: .cancel) { model.onCancel() }
                 Spacer()

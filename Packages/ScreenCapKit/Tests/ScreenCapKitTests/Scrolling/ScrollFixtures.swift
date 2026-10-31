@@ -105,6 +105,33 @@ enum ScrollFixtures {
         }
     }
 
+    /// A list of `rows` text rows spread over `length` lines (rows 18 or 19 lines tall at 80 rows
+    /// over 1500), every row drawn from the same "glyphs", like a log or Terminal repeating one line.
+    /// With `ruleEvery`, every n-th row is a horizontal rule instead, like a table.
+    static func repetitiveList(rows: Int, length: Int, breadth: Int, ruleEvery: Int? = nil) -> [Line] {
+        var random = SeededGenerator(seed: 21)
+        let white = pixel(255, 255, 255)
+        let ink = pixel(30, 30, 30)
+        // One row of text: 12 lines of speckled glyphs, then blank space.
+        let glyphs: [Line] = (0..<12).map { _ in
+            (0..<breadth).map { index in
+                let isText = index > 8 && index < breadth * 2 / 3
+                return isText && Int.random(in: 0..<3, using: &random) == 0 ? ink : white
+            }
+        }
+        let rule = Line(repeating: pixel(120, 120, 120), count: breadth)
+        let blank = Line(repeating: white, count: breadth)
+        return (0..<length).map { line in
+            let row = line * rows / length
+            let top = row * length / rows + (row * length % rows == 0 ? 0 : 1)
+            let inRow = line - top
+            if let ruleEvery, row % ruleEvery == ruleEvery - 1 {
+                return inRow == 8 ? rule : blank
+            }
+            return inRow >= 2 && inRow < 14 ? glyphs[inRow - 2] : blank
+        }
+    }
+
     /// Solid header/footer-style lines with their own speckle pattern.
     static func bar(length: Int, breadth: Int, seed: UInt64) -> [Line] {
         page(length: length, breadth: breadth, seed: seed).map { line in line.map { $0 ^ 0x0030_0000 } }
