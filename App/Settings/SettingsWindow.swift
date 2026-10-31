@@ -14,6 +14,7 @@ struct SettingsView: View {
                 .tabItem { Label("Quick Access", systemImage: "rectangle.stack") }
             ShortcutsSettingsPane()
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
+            ScrollingSettingsPane(settings: .shared).tabItem { Label("Scrolling", systemImage: "scroll") }
             TextRecognitionSettingsPane(settings: settings)
                 .tabItem { Label("Text Recognition", systemImage: "text.viewfinder") }
         }
