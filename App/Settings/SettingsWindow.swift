@@ -12,6 +12,7 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             ShortcutsSettingsPane()
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
+            AnnotateSettingsPane(settings: settings).tabItem { Label("Annotate", systemImage: "pencil.and.outline") }
         }
         .frame(width: 520, height: 560)
     }

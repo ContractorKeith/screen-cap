@@ -34,7 +34,7 @@ struct MenuModelTests {
         let menu = MenuBuilder.menu(from: AppMenu.entries(actions(Recorder())))
         let titles = menu.items.map { $0.isSeparatorItem ? "-" : $0.title }
         #expect(titles == [
-            "Capture Area", "Capture Window", "Capture Fullscreen", "All-In-One", "Capture", "-",
+            "Capture Area", "Capture Window", "Capture Fullscreen", "All-In-One", "Capture", "Annotate", "-",
             "Screen Recording Permission…", "Launch at Login", "Settings…", "-", "Quit ScreenCap"
         ])
         #expect(menu.item(withTitle: "Settings…")?.keyEquivalent == ",")

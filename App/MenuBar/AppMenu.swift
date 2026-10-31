@@ -27,6 +27,7 @@ enum AppMenu {
                 capture("Scrolling Capture", .scrolling, actions),
                 capture("Capture Text", .text, actions)
             ]),
+            .submenu("Annotate", EditorMenu.entries),
             .separator,
             .item(MenuAction("Screen Recording Permission…", perform: actions.openOnboarding)),
             .item(MenuAction("Launch at Login", isOn: actions.launchAtLoginIsOn, perform: actions.toggleLaunchAtLogin)),
