@@ -24,6 +24,21 @@ final class AppAutomationHandler: AutomationHandling {
         }
     }
 
+    func captureText(rect: CGRect, lineBreaks: Bool) {
+        coordinator.captureText(rect: rect, lineBreaks: lineBreaks, queueIfBusy: true)
+    }
+
+    /// The scrolling feature starts its own capture from `.scrollingCaptureRequested`, so the
+    /// request itself waits for the queue (#102). Observers on the main queue run synchronously.
+    func scrollingCapture(rect: CGRect, start: Bool, autoscroll: Bool) {
+        let info: [String: Any] = [
+            AutomationKey.rect: NSValue(rect: rect), AutomationKey.start: start, AutomationKey.autoscroll: autoscroll
+        ]
+        coordinator.whenIdle("scrolling at \(rect)") { [weak self] in
+            self?.post(.scrollingCaptureRequested, userInfo: info)
+        }
+    }
+
     func post(_ name: Notification.Name, userInfo: [String: Any]) {
         appLog.notice("URL scheme posting \(name.rawValue, privacy: .public)")
         NotificationCenter.default.post(name: name, object: self, userInfo: userInfo.isEmpty ? nil : userInfo)

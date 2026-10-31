@@ -146,6 +146,12 @@ public actor HistoryStore {
         return record
     }
 
+    /// How many records `purge(olderThan: days)` would delete; for confirming first (#101).
+    public func count(olderThan days: Int) -> Int {
+        let cutoff = Self.cutoff(days: days, now: now())
+        return index.count { $0.createdAt < cutoff }
+    }
+
     /// Deletes every record created more than `days` days ago. Returns the removed IDs.
     @discardableResult
     public func purge(olderThan days: Int = HistoryStore.defaultRetentionDays) throws -> [UUID] {

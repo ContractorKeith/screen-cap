@@ -191,6 +191,8 @@ public actor CaptureService {
             config.height = Int(size.height)
             image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         }
+        // Drop canvas past the shadow and even out the margins so the window sits centered (#100).
+        if request.includeShadow, let trimmed = WindowShadow.trimmed(image) { image = trimmed }
         return CapturedImage(cgImage: image, scale: scale, pointRect: request.frame, displayID: request.displayID)
     }
 }

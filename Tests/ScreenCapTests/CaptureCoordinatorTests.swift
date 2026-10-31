@@ -84,7 +84,7 @@ struct CaptureCoordinatorTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let setup = harness(history: store)
         var recognized: [CGImage] = []
-        setup.coordinator.textHandler = { image in
+        setup.coordinator.textHandler = { image, _ in
             recognized.append(image)
             return "Hello Zebra"
         }
@@ -103,7 +103,7 @@ struct CaptureCoordinatorTests {
         let (store, directory) = try makeStore()
         defer { try? FileManager.default.removeItem(at: directory) }
         let setup = harness(history: store)
-        setup.coordinator.textHandler = { _ in nil }
+        setup.coordinator.textHandler = { _, _ in nil }
 
         await setup.coordinator.capture(.text, rect: rect)?.value
 
@@ -115,7 +115,7 @@ struct CaptureCoordinatorTests {
     @Test func failedRecognitionFailsTheCapture() async throws {
         struct OCRFailed: Error {}
         let setup = harness()
-        setup.coordinator.textHandler = { _ in throw OCRFailed() }
+        setup.coordinator.textHandler = { _, _ in throw OCRFailed() }
         await setup.coordinator.capture(.text, rect: rect)?.value
         #expect(setup.coordinator.lastOutcome?.exitStatus == 1)
     }
@@ -200,6 +200,61 @@ struct CaptureCoordinatorTests {
         try await waitUntilIdle(setup.coordinator)
 
         #expect(setup.sink.delivered.map(\.rect) == (1...(CaptureCoordinator.queueLimit + 1)).map(region))
+    }
+
+    // MARK: - #102 text and scrolling regions queue too
+
+    @Test func textRegionQueuesBehindARunningCapture() async throws {
+        let setup = harness(source: FakeSource(delay: .milliseconds(30)))
+        var lineBreaks: [Bool?] = []
+        setup.coordinator.textHandler = { _, keep in
+            lineBreaks.append(keep)
+            return nil
+        }
+        setup.coordinator.capture(.area, rect: region(1), action: .pin, queueIfBusy: true)
+        #expect(setup.coordinator.captureText(rect: region(2), lineBreaks: false, queueIfBusy: true) == nil)
+        #expect(setup.coordinator.queuedCount == 1)
+        #expect(lineBreaks.isEmpty)
+
+        try await waitUntilIdle(setup.coordinator)
+
+        // The area finished before OCR grabbed its rect, and the URL's linebreaks reached the handler.
+        #expect(await setup.source.areas == [region(1), region(2)])
+        #expect(lineBreaks == [false])
+        #expect(setup.alerts.busy == 0)
+    }
+
+    @Test func whenIdleRunsNowOrAfterTheQueue() async throws {
+        let setup = harness(source: FakeSource(delay: .milliseconds(30)))
+        var order: [String] = []
+        #expect(setup.coordinator.whenIdle("now") { order.append("now") })
+        #expect(order == ["now"])
+
+        setup.coordinator.capture(.area, rect: region(1), action: .pin, queueIfBusy: true)
+        setup.coordinator.capture(.area, rect: region(2), action: .pin, queueIfBusy: true)
+        #expect(setup.coordinator.whenIdle("scrolling") {
+            order.append("scrolling after \(setup.sink.delivered.count)")
+            // What the scrolling feature does: start its own capture, which must not be refused.
+            setup.coordinator.capture(.area, rect: region(3), action: .pin)
+        })
+        #expect(order == ["now"])
+
+        try await waitUntilIdle(setup.coordinator)
+
+        #expect(order == ["now", "scrolling after 2"])
+        #expect(setup.sink.delivered.map(\.rect) == [region(1), region(2), region(3)])
+        #expect(setup.alerts.busy == 0)
+    }
+
+    @Test func whenIdleRespectsTheQueueLimit() {
+        let setup = harness(source: FakeSource(delay: .milliseconds(30)))
+        for index in 0...CaptureCoordinator.queueLimit {
+            setup.coordinator.capture(.area, rect: region(index), action: .pin, queueIfBusy: true)
+        }
+        var ran = false
+        #expect(!setup.coordinator.whenIdle("scrolling") { ran = true })
+        #expect(!ran)
+        #expect(setup.alerts.busy == 1)
     }
 
     @Test func shortcutsStillRefuseWhileBusy() async throws {
