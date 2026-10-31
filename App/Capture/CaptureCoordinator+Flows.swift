@@ -51,6 +51,14 @@ extension CaptureCoordinator {
         }
     }
 
+    /// OCR of a known rect with an optional Keep Line Breaks override (URL `capture-text`).
+    func runText(_ rect: CGRect, lineBreaks: Bool?, app: FrontApp?) async throws {
+        let windows = (try? await source.shareableWindows()) ?? []
+        let flow = Flow(kind: .text, geometry: DisplayGeometry.fromCurrentScreens(),
+                        context: frontContext(windows: windows, app: app), action: nil)
+        try await recognizeText(rect, stills: [], flow, lineBreaks: lineBreaks)
+    }
+
     func runWindow(ofApp app: String, action: AfterCaptureAction?, front: FrontApp?) async throws {
         let windows = WindowPicker(windows: try await source.shareableWindows()).windows
         let match = windows.first {
@@ -178,11 +186,12 @@ extension CaptureCoordinator {
     /// OCR of a selected area, awaited so `--quit` waits for it. Without a handler, posts the rect.
     /// Every path (shortcut, menu, All-In-One, URL region) lands here, and the `.text` History record
     /// is written here rather than in the handler, so its OCR text is searchable (#53, #72).
-    private func recognizeText(_ rect: CGRect, stills: [CapturedImage], _ flow: Flow) async throws {
+    private func recognizeText(_ rect: CGRect, stills: [CapturedImage], _ flow: Flow,
+                               lineBreaks: Bool? = nil) async throws {
         guard let textHandler else { return post(.captureTextRequested, rect: rect) }
         let image = try await areaImage(rect, stills: stills, geometry: flow.geometry)
         let recordID = await TextCaptureController.addTextRecord(image, context: flow.context, to: history)
-        let text = try await textHandler(image.cgImage)
+        let text = try await textHandler(image.cgImage, lineBreaks)
         if let recordID, let history, let text, !text.isEmpty {
             await TextCaptureController.storeText(text, recordID: recordID, in: history)
         }

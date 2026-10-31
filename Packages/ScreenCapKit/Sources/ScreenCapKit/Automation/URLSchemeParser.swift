@@ -193,11 +193,12 @@ private struct Params {
         }
         let x = try number("x", minimum: 0, inclusive: true)
         let y = try number("y", minimum: 0, inclusive: true)
-        let width = try number("width", minimum: 0, inclusive: false)
-        let height = try number("height", minimum: 0, inclusive: false)
+        // Under a point there's nothing to capture; say so here rather than as "off screen" later.
+        let width = try number("width", minimum: 1, inclusive: true)
+        let height = try number("height", minimum: 1, inclusive: true)
         var display = 1
         if let raw = values["display"] {
-            guard let value = Int(raw), value >= 1 else {
+            guard Self.decimal(raw) != nil, !raw.contains("."), let value = Int(raw), value >= 1 else {
                 throw URLSchemeParseError.invalidParameter(name: "display", value: raw)
             }
             display = value
@@ -207,9 +208,18 @@ private struct Params {
 
     private func number(_ key: String, minimum: Double, inclusive: Bool) throws -> Double {
         let raw = values[key] ?? ""
-        guard let value = Double(raw), value.isFinite, inclusive ? value >= minimum : value > minimum else {
+        guard let value = Self.decimal(raw), inclusive ? value >= minimum : value > minimum else {
             throw URLSchemeParseError.invalidParameter(name: key, value: raw)
         }
         return value
+    }
+
+    /// Plain decimals only (`12`, `12.5`, `.5`): no sign, hex, exponent, `_`, `inf`/`nan` or
+    /// whitespace, all of which `Double(_:)` accepts (#102).
+    static func decimal(_ raw: String) -> Double? {
+        let parts = raw.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count <= 2, parts.contains(where: { !$0.isEmpty }),
+              parts.allSatisfy({ $0.allSatisfy { $0.isASCII && $0.isNumber } }) else { return nil }
+        return Double(raw).flatMap { $0.isFinite ? $0 : nil }
     }
 }

@@ -157,6 +157,33 @@ struct URLSchemeErrorTests {
                     .invalidParameter(name: "filepath", value: "/tmp/shot.png"))
     }
 
+    /// `Double(_:)` takes hex, signs, `_`, exponents and spaces; regions take plain decimals only (#102).
+    @Test(arguments: ["0x10", "1_000", "+5", "%2010", "10%20", "1e2", "inf", "nan", "1.2.3", ".", "５"])
+    func regionNumbersAreStrictDecimals(raw: String) throws {
+        let url = try #require(URL(string: "screencap://capture-area?x=\(raw)&y=0&width=10&height=10"))
+        let decoded = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first?.value)
+        #expect(throws: URLSchemeParseError.invalidParameter(name: "x", value: decoded)) {
+            try schemeStubParser.parse(url)
+        }
+    }
+
+    @Test func plainDecimalsParse() throws {
+        #expect(try parseScheme("screencap://capture-area?x=0.5&y=.5&width=10.&height=007")
+            == .captureArea(region: Region(x: 0.5, y: 0.5, width: 10, height: 7, display: 1), action: nil))
+        expectParseError("screencap://capture-area?x=0&y=0&width=1&height=1&display=0x2",
+                         .invalidParameter(name: "display", value: "0x2"))
+        expectParseError("screencap://capture-area?x=0&y=0&width=1&height=1&display=+2",
+                         .invalidParameter(name: "display", value: "+2"))
+    }
+
+    /// Under one point is a size error at parse time, not "off screen" later (#102).
+    @Test func subPointRegionsAreRejected() {
+        expectParseError("screencap://capture-area?x=0&y=0&width=0.0001&height=10",
+                         .invalidParameter(name: "width", value: "0.0001"))
+        expectParseError("screencap://capture-text?x=0&y=0&width=10&height=0.5",
+                         .invalidParameter(name: "height", value: "0.5"))
+    }
+
     @Test func unreadableFile() {
         expectParseError("screencap://pin?filepath=/tmp/missing.png", .unreadableFile(path: "/tmp/missing.png"))
     }

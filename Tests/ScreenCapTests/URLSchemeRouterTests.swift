@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 /// One call the router made on its handler.
 enum RouterCall: Equatable {
     case capture(ScreenCap.CaptureKind, CGRect?, AfterCaptureAction?)
+    case captureText(CGRect, lineBreaks: Bool)
+    case scrolling(CGRect, start: Bool, autoscroll: Bool)
     case post(Notification.Name, [String])
     case openFromClipboard
     case openSettings(AutomationCommand.SettingsTab?)
@@ -25,6 +27,14 @@ struct URLSchemeRouterTests {
 
         func capture(_ kind: ScreenCap.CaptureKind, rect: CGRect?, action: AfterCaptureAction?) {
             calls.append(.capture(kind, rect, action))
+        }
+
+        func captureText(rect: CGRect, lineBreaks: Bool) {
+            calls.append(.captureText(rect, lineBreaks: lineBreaks))
+        }
+
+        func scrollingCapture(rect: CGRect, start: Bool, autoscroll: Bool) {
+            calls.append(.scrolling(rect, start: start, autoscroll: autoscroll))
         }
 
         func post(_ name: Notification.Name, userInfo: [String: Any]) {
@@ -108,11 +118,9 @@ struct URLSchemeRouterTests {
     @Test func scrolling() throws {
         #expect(try calls("screencap://scrolling-capture") == [.capture(.scrolling, nil, nil)])
         let recorder = try run("screencap://scrolling-capture?x=200&y=100&width=900&height=700&start=true")
-        #expect(recorder.calls == [.post(.scrollingCaptureRequested, ["autoscroll", "rect", "start"])])
-        let info = try #require(recorder.infos.first)
-        #expect((info["rect"] as? NSValue)?.rectValue == CGRect(x: 200, y: 100, width: 900, height: 700))
-        #expect(info["start"] as? Bool == true)
-        #expect(info["autoscroll"] as? Bool == false)
+        // Regions go through the handler's queue-aware entry point, not a bare notification (#102).
+        #expect(recorder.calls == [.scrolling(CGRect(x: 200, y: 100, width: 900, height: 700),
+                                              start: true, autoscroll: false)])
     }
 
     @Test func captureText() throws {
@@ -122,8 +130,7 @@ struct URLSchemeRouterTests {
         #expect((file.infos.first?["url"] as? URL)?.path == Self.imagePath)
         #expect(file.infos.first?["lineBreaks"] as? Bool == false)
         let region = try run("screencap://capture-text?x=0&y=0&width=500&height=200")
-        #expect(region.calls == [.post(.captureTextRequested, ["lineBreaks", "rect"])])
-        #expect((region.infos.first?["rect"] as? NSValue)?.rectValue == CGRect(x: 0, y: 0, width: 500, height: 200))
+        #expect(region.calls == [.captureText(CGRect(x: 0, y: 0, width: 500, height: 200), lineBreaks: true)])
     }
 
     // MARK: - Files and windows

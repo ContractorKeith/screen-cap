@@ -68,6 +68,9 @@ final class QuickAccessController: CaptureSink {
         }
     }
 
+    /// History records of the panels on screen, newest first (the quit path marks them closed, #103).
+    var openRecordIDs: [UUID] { items.compactMap(\.result.historyRecordID) }
+
     /// Removes a panel and closes the gap. `markClosed` records it for Restore Recently Closed.
     func remove(_ item: QuickAccessItem, markClosed: Bool) {
         guard let index = items.firstIndex(where: { $0 === item }) else { return }

@@ -25,8 +25,8 @@ The parser lives in `Packages/ScreenCapKit/Sources/ScreenCapKit/Automation/`
 
 | Parameter | Values | Notes |
 |---|---|---|
-| `x`, `y` | number ≥ 0 | Points, (0,0) is the **lower-left** corner of the display. The whole region must lie inside the display |
-| `width`, `height` | number > 0 | Points |
+| `x`, `y` | decimal ≥ 0 | Points, (0,0) is the **lower-left** corner of the display. The whole region must lie inside the display |
+| `width`, `height` | decimal ≥ 1 | Points |
 | `display` | integer ≥ 1 | 1-based display index. Default `1`. Only valid with a region |
 | `action` | `copy`, `save`, `annotate`, `pin`, `overlay` | What to do after the capture |
 | `filepath` | absolute path | Must exist, be readable and be an image. `~` is expanded |
@@ -34,6 +34,12 @@ The parser lives in `Packages/ScreenCapKit/Sources/ScreenCapKit/Automation/`
 
 A region is all of `x`, `y`, `width` and `height`, or none of them. Giving only some is an
 error.
+
+Numbers are plain decimals (`120`, `12.5`): signs, hex (`0x10`), `_`, exponents and spaces are
+rejected.
+
+Captures started by URL while another capture is running wait their turn (up to five), including
+`capture-text` and `scrolling-capture` with a region.
 
 ## Commands
 

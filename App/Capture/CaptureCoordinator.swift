@@ -28,7 +28,8 @@ final class CaptureCoordinator {
     /// Runs OCR on a selected area's image (App/TextRecognition) and returns the text for History.
     /// Awaited, so `--quit` waits for it. The coordinator writes the `.text` History record itself
     /// (#53, #72), so no handler can skip it. Nil posts `.captureTextRequested` with the rect instead.
-    var textHandler: (@MainActor (CGImage) async throws -> String?)?
+    /// The Bool is a Keep Line Breaks override (URL `linebreaks=`); nil uses the setting.
+    var textHandler: (@MainActor (CGImage, Bool?) async throws -> String?)?
     /// Whether `.overlay` shows Quick Access; when off the coordinator saves instead (#75).
     var showsQuickAccess: @MainActor () -> Bool = { QuickAccessPreferences.showAfterCapture }
     /// Busy and save/copy failure HUDs; tests swap these out.
@@ -100,6 +101,34 @@ final class CaptureCoordinator {
         }
     }
 
+    /// OCR of a known rect (URL `capture-text` region), so it queues like other URL captures (#102).
+    @discardableResult
+    func captureText(rect: CGRect, lineBreaks: Bool?, queueIfBusy: Bool = false) -> Task<Void, Never>? {
+        let app = frontApps.app
+        return start("text at \(rect)", queueIfBusy: queueIfBusy) { coordinator in
+            try await coordinator.runText(rect, lineBreaks: lineBreaks, app: app)
+        }
+    }
+
+    /// Runs `action` now if no capture is running, else once the captures queued ahead of it finish.
+    /// For features that start their own capture (URL scrolling regions, #102). Returns false and
+    /// shows the busy HUD when the queue is full.
+    @discardableResult
+    func whenIdle(_ label: String, _ action: @escaping @MainActor () -> Void) -> Bool {
+        guard current != nil else {
+            action()
+            return true
+        }
+        guard pending.count < Self.queueLimit else {
+            appLog.notice("Capture \(label, privacy: .public) ignored: the capture queue is full")
+            alerts.busy()
+            return false
+        }
+        pending.append(Pending(label: label, work: .trigger(action)))
+        appLog.notice("Capture \(label, privacy: .public) queued behind the running capture")
+        return true
+    }
+
     /// Captures an app's frontmost window without the picker. Used by `--capture window --window <app>`.
     @discardableResult
     func captureWindow(ofApp app: String, action: AfterCaptureAction? = nil) -> Task<Void, Never>? {
@@ -111,7 +140,14 @@ final class CaptureCoordinator {
 
     private struct Pending {
         let label: String
-        let body: @MainActor (CaptureCoordinator) async throws -> Void
+        let work: PendingWork
+    }
+
+    private enum PendingWork {
+        /// A capture body to run under `start`.
+        case capture(@MainActor (CaptureCoordinator) async throws -> Void)
+        /// Something that starts its own capture (see `whenIdle`).
+        case trigger(@MainActor () -> Void)
     }
 
     /// Permission check, one capture at a time (URL captures queue), error logging and the failure HUD.
@@ -126,7 +162,7 @@ final class CaptureCoordinator {
         }
         guard current == nil else {
             if queueIfBusy, pending.count < Self.queueLimit {
-                pending.append(Pending(label: label, body: body))
+                pending.append(Pending(label: label, work: .capture(body)))
                 appLog.notice("Capture \(label, privacy: .public) queued behind the running capture")
                 return nil
             }
@@ -161,7 +197,10 @@ final class CaptureCoordinator {
     private func startNextPending() {
         while current == nil, !pending.isEmpty {
             let next = pending.removeFirst()
-            _ = start(next.label, next.body)
+            switch next.work {
+            case let .capture(body): _ = start(next.label, body)
+            case let .trigger(action): action()
+            }
         }
     }
 
