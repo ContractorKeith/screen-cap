@@ -50,7 +50,7 @@ enum Magnifier {
     private static func readoutLines(global: CGPoint, display: DisplayInfo, selection: CGSize?, hex: String?)
         -> [String] {
         let local = SelectionMath.localTopLeft(global, in: display.frame)
-        var lines = ["\(Int(local.x)), \(Int(local.y)) pt"]
+        var lines = ["\(SelectionMath.wholeNumber(local.x)), \(SelectionMath.wholeNumber(local.y)) pt"]
         if let selection { lines.append(SelectionMath.sizeLabel(selection) + " pt") }
         if let hex { lines.append(hex) }
         return lines

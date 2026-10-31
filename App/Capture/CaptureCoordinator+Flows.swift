@@ -87,17 +87,20 @@ extension CaptureCoordinator {
 
     private func select(_ flow: Flow, windows: [ShareableWindow], preselected: CGRect? = nil) async throws {
         // Frozen stills only when they're shown and used: live mode and the self-timer capture after.
-        let freezes = settings.freezeScreen && flow.kind != .selfTimer
-        let stills = freezes ? try await source.captureAllDisplays() : []
+        // Unfrozen, the magnifier samples small live regions instead (#62, #90).
+        let sources = OverlaySources(kind: flow.kind, freezeScreen: settings.freezeScreen,
+                                     showMagnifier: settings.showMagnifier)
+        let stills = sources.freezes ? try await source.captureAllDisplays() : []
         let options = SelectionOptions(
-            showsStill: freezes,
+            showsStill: sources.freezes,
             showsCrosshair: settings.showCrosshair,
-            showsMagnifier: settings.showMagnifier,
+            magnifier: sources.magnifier,
             allInOne: flow.kind == .allInOne,
             startMode: flow.kind == .window ? .window : .area,
             previousRect: preselected ?? previousArea.rect(validIn: flow.geometry)
         )
-        let overlay = SelectionOverlay(stills: stills, geometry: flow.geometry, windows: windows, options: options)
+        let overlay = SelectionOverlay(stills: stills, geometry: flow.geometry, windows: windows, options: options,
+                                       sampler: sources.magnifier == .live ? ScreenPixelSampler() : nil)
         switch await overlay.run() {
         case .cancelled:
             appLog.info("Selection cancelled")

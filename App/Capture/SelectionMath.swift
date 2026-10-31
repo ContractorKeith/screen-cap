@@ -50,11 +50,22 @@ enum SelectionMath {
         return 1
     }
 
+    /// Largest typed side, in points (#85). Well past any display, far below anything that overflows.
+    static let maximumFixedSide: CGFloat = 32768
+
     /// A rect of `size` centered on `point`, kept inside `bounds` when it fits.
+    ///
+    /// Total: non-finite or negative sides become 0, oversized ones are capped at `maximumFixedSide`,
+    /// and a non-finite point falls back to the middle of `bounds`.
     static func fixedRect(size: CGSize, centeredAt point: CGPoint, within bounds: CGRect) -> CGRect {
-        let rect = CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2,
-                          width: size.width, height: size.height)
+        let width = boundedSide(size.width), height = boundedSide(size.height)
+        let center = point.x.isFinite && point.y.isFinite ? point : CGPoint(x: bounds.midX, y: bounds.midY)
+        let rect = CGRect(x: center.x - width / 2, y: center.y - height / 2, width: width, height: height)
         return snapped(clamp(rect, to: bounds))
+    }
+
+    private static func boundedSide(_ value: CGFloat) -> CGFloat {
+        value.isFinite ? min(max(value, 0), maximumFixedSide) : 0
     }
 
     /// Moves `rect` (without resizing) so it lies inside `bounds`; pins to the min edge if too big.
@@ -78,18 +89,28 @@ enum SelectionMath {
         return rect.width >= minimumSize && rect.height >= minimumSize
     }
 
-    /// Parses a typed size such as `800x600`, `800 × 600` or `800,600`. Nil if not two positive numbers.
+    /// Parses a typed size such as `800x600`, `800 × 600` or `800,600`.
+    ///
+    /// Nil unless both sides are finite and, once rounded, between 1 and `maximumFixedSide`
+    /// (rejects `inf`, `nan`, `1e309`, negatives and absurd sizes; #85).
     static func parseSize(_ text: String) -> CGSize? {
         let separators = CharacterSet(charactersIn: "xX×*, ")
         let parts = text.components(separatedBy: separators).filter { !$0.isEmpty }
-        guard parts.count == 2, let width = Double(parts[0]), let height = Double(parts[1]),
-              width >= 1, height >= 1 else { return nil }
-        return CGSize(width: width.rounded(), height: height.rounded())
+        guard parts.count == 2, let width = Double(parts[0]), let height = Double(parts[1]) else { return nil }
+        let sides = [width.rounded(), height.rounded()]
+        guard sides.allSatisfy({ $0.isFinite && $0 >= 1 && $0 <= Double(maximumFixedSide) }) else { return nil }
+        return CGSize(width: sides[0], height: sides[1])
     }
 
-    /// Label for a size badge, e.g. `800 × 600`.
+    /// Label for a size badge, e.g. `800 × 600`. Total: never traps on non-finite or huge values.
     static func sizeLabel(_ size: CGSize) -> String {
-        "\(Int(size.width.rounded())) × \(Int(size.height.rounded()))"
+        "\(wholeNumber(size.width)) × \(wholeNumber(size.height))"
+    }
+
+    /// `value` rounded for display; non-finite becomes 0 and the magnitude is capped so `Int` can't trap.
+    static func wholeNumber(_ value: CGFloat) -> Int {
+        guard value.isFinite else { return 0 }
+        return Int(min(max(value.rounded(), -1e12), 1e12))
     }
 
     /// `#RRGGBB` from 8-bit components.
