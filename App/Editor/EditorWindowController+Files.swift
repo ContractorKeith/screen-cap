@@ -8,26 +8,29 @@ import UniformTypeIdentifiers
 extension EditorWindowController {
     static let projectType = UTType(filenameExtension: ProjectFile.fileExtension, conformingTo: .package) ?? .package
 
+    /// ⌘S. Code that needs to know when the save finishes calls `performSave(completion:)`.
     @objc func saveDocument(_ sender: Any?) {
-        saveDocument()
+        performSave(completion: nil)
     }
 
-    /// ⌘S: writes the `.screencap` package in place, or asks where the first time.
-    /// `done` gets true once the project is written, false if the user cancels or the write fails.
-    func saveDocument(then done: (@MainActor (Bool) -> Void)? = nil) {
+    /// Writes the `.screencap` package in place, or asks where the first time. `completion` gets
+    /// true once the project is written, false if the user cancels or the write fails.
+    /// Named apart from `saveDocument(_:)` on purpose: `saveDocument { … }` would bind the closure
+    /// to that action's `sender` and never call it (#97).
+    func performSave(completion done: (@MainActor (Bool) -> Void)?) {
         canvas.commitTextEditing()
         if let url = model.fileURL {
             writeProject(to: url, then: done)
         } else {
-            saveDocumentAs(then: done)
+            performSaveAs(completion: done)
         }
     }
 
     @objc func saveDocumentAs(_ sender: Any?) {
-        saveDocumentAs()
+        performSaveAs(completion: nil)
     }
 
-    private func saveDocumentAs(then done: (@MainActor (Bool) -> Void)? = nil) {
+    private func performSaveAs(completion done: (@MainActor (Bool) -> Void)?) {
         guard let window else { done?(false); return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [Self.projectType]

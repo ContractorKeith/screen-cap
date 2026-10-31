@@ -135,13 +135,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard hasUnsavedChanges else { return true }
-        UnsavedChangesPrompt.show(for: sender, quitting: false) { [weak self] outcome in
+        UnsavedChangesPrompt.show(for: sender, quitting: false) { [weak self] answer in
             guard let self else { return }
-            switch outcome {
-            case .saved: self.saveDocument { saved in if saved { self.forceClose() } }
-            case .discarded: self.forceClose()
-            case .cancelled: break
-            }
+            UnsavedChangesFlow.resolve(answer, save: { self.performSave(completion: $0) }, done: { outcome in
+                if outcome != .cancelled { self.forceClose() }
+            })
         }
         return false
     }

@@ -194,10 +194,15 @@ struct RedactionToggle: View {
                 })
                 .help("Saving a project flattens redactions into the image, so the pixels beneath them "
                     + "aren't kept in the file. They can't be moved or removed after the project is reopened.")
-                if model.isRedaction(first), !first.isOpaqueCover {
-                    Text("This shape isn't fully opaque, so what's under it stays visible.")
+                if model.isRedaction(first), !first.coversAsRedaction {
+                    Text("This shape has no fill, so what's under it stays visible.")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if model.isRedaction(first), !first.isOpaqueCover {
+                    Text("Drawn fully opaque while it's used as a redaction.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if !model.isRedaction(first), first.isOpaqueCover {
                     Text("The pixels under this shape are kept in saved projects.")

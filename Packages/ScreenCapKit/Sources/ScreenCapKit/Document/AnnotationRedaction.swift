@@ -15,25 +15,57 @@ extension Annotation {
         }
     }
 
-    /// True when the object paints a fully opaque fill over `coverRect`, so the pixels beneath
-    /// can't be seen in the render (but would still be in an unbaked project file).
+    /// True when the object paints a fill over `coverRect` that hides what's beneath, so it
+    /// reads as a redaction bar. Near-opaque counts (#99): at 90% or more, a levels stretch
+    /// brings the text back, so these get the same treatment as fully opaque covers.
     public var isOpaqueCover: Bool {
-        guard style.opacity >= Self.opaque else { return false }
+        let opacity = min(max(style.opacity, 0), 1)
+        func covers(_ color: RGBAColor?) -> Bool { opacity * (color?.alpha ?? 0) >= Self.nearOpaque }
         switch kind {
         case let .rectangle(_, filled, _):
-            let fill = filled ? (style.fillColor ?? style.strokeColor) : style.fillColor
-            return (fill?.alpha ?? 0) >= Self.opaque
+            return covers(filled ? (style.fillColor ?? style.strokeColor) : style.fillColor)
         case .ellipse:
-            return (style.fillColor?.alpha ?? 0) >= Self.opaque
+            return covers(style.fillColor)
         case let .highlight(_, color):
-            // Highlights multiply, so only black hides what's below.
-            return color.alpha >= Self.opaque && max(color.red, color.green, color.blue) <= 0.01
+            // Highlights multiply, so only a dark color hides what's below.
+            return covers(color) && max(color.red, color.green, color.blue) <= Self.darkHighlight
         case let .text(_, preset, _, _):
-            let background = style.fillColor ?? style.strokeColor
-            return Self.backgroundPresets.contains(preset) && background.alpha >= Self.opaque
+            return Self.backgroundPresets.contains(preset) && covers(style.fillColor ?? style.strokeColor)
         default:
             return false
         }
+    }
+
+    /// How a shape used as a redaction is drawn: fully opaque, with highlights painted as a solid
+    /// fill rather than multiplied, so nothing beneath survives a curves or levels adjustment (#99).
+    /// Other objects come back unchanged.
+    public var solidCover: Annotation {
+        guard redaction == true, canBeRedaction else { return self }
+        var copy = self
+        copy.style.opacity = 1
+        copy.style.strokeColor.alpha = 1
+        copy.style.fillColor?.alpha = 1
+        if case let .highlight(region, color) = kind {
+            var solid = color
+            solid.alpha = 1
+            copy.style.shadow = nil
+            switch region {
+            case let .rect(rect):
+                copy.style.fillColor = solid
+                copy.kind = .rectangle(rect: rect, filled: true, cornerRadius: 0)
+            case let .path(points):
+                copy.style.strokeColor = solid
+                copy.kind = .path(points: points, smoothed: false)
+            }
+        }
+        return copy
+    }
+
+    /// True if the object hides what's beneath once used as a redaction (it has a fill).
+    public var coversAsRedaction: Bool {
+        var marked = self
+        marked.redaction = true
+        return marked.solidCover.isOpaqueCover
     }
 
     /// The area the object's fill covers, in image pixels. Null for kinds that can't cover.
@@ -57,7 +89,8 @@ extension Annotation {
         return isOpaqueCover && RedactionCoverage.coversText(coverRect, lines: textLines)
     }
 
-    private static let opaque = 0.999
+    private static let nearOpaque = 0.9
+    private static let darkHighlight = 0.2
     private static let backgroundPresets: Set<Int> = [TextPreset.filledBackground.rawValue,
                                                       TextPreset.roundedLabel.rawValue]
 }
