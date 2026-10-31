@@ -19,6 +19,8 @@ enum ScrollingStopReason: Equatable, Sendable {
     case stopped
     /// Esc key.
     case escape
+    /// A frame couldn't be captured (permission revoked, display gone); what was stitched is kept.
+    case failed
 }
 
 /// Scrolling capture state machine. Pure, so it is unit-tested; the controller drives the UI from it.
@@ -124,6 +126,11 @@ struct ScrollingSession: Equatable {
     /// Esc behaves like Stop.
     mutating func escape() {
         if isCapturing { finish(.escape) } else { cancel() }
+    }
+
+    /// A frame capture failed: stop and keep what was stitched. Before Start it cancels.
+    mutating func fail() {
+        if isCapturing { finish(.failed) } else { cancel() }
     }
 
     mutating func cancel() {

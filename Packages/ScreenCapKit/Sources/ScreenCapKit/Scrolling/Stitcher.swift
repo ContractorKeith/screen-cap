@@ -8,11 +8,15 @@ import CoreGraphics
 /// and only the newly revealed strip is appended. The leading edge (header) is kept once at
 /// the start, the trailing edge (footer) once at the end.
 ///
-/// A frame that doesn't overlap the last one is held back. If the next frame doesn't overlap
-/// the last one either, the content really jumped (scrolled faster than one region per frame):
-/// the held frame is appended whole after a dashed seam marker, reported as `.gapDetected`, and
-/// stitching continues from it. If the next frame does overlap, the held one was a transient
-/// (animation, lazy load) and is dropped.
+/// A frame that can't be placed against the last one is held back:
+/// - `.unrelated` (no overlap): if the next frame can't be placed either, the content really
+///   jumped (scrolled faster than one region per frame).
+/// - `.ambiguous` (repeating rows match at several offsets): later frames that are just as
+///   ambiguous replace it, waiting for one that lines up.
+/// When a later frame lines up with the last placed one, the held frame was a transient
+/// (animation, lazy load, an in-between scroll position) and is dropped. Otherwise the held frame
+/// is appended whole after a dashed seam marker, reported as `.gapDetected`, and stitching
+/// continues from it. `finish()` keeps a frame still held when the capture stops the same way.
 public actor Stitcher {
     /// What happened to one appended frame.
     public enum AppendOutcome: Equatable, Sendable {
@@ -24,6 +28,8 @@ public actor Stitcher {
         case noMovement
         /// Could not be aligned (different size, animation, a jump); held back or dropped.
         case unrelated
+        /// Repeating content matched at several offsets and nothing told them apart; held back.
+        case ambiguous
         /// The content jumped past the last frame: a seam marker and the held frame were
         /// appended, plus this frame's new strip; `lines` counts all added lines.
         case gapDetected(lines: Int)
@@ -50,10 +56,10 @@ public actor Stitcher {
 
     private var first: Accepted?
     private var last: Accepted?
-    /// A frame that didn't overlap `last`, waiting to see whether the content jumped.
-    private var pending: Accepted?
-    /// The offset accepted for the previous frame pair.
-    private var previousStep: Int?
+    /// Why a frame is held back.
+    private enum Hold { case unrelated, ambiguous }
+    /// A frame that couldn't be placed against `last`, waiting to see whether the content jumped.
+    private var pending: (frame: Accepted, reason: Hold)?
     private var edges = FixedEdges.none
     /// Edges are known once a pair aligned; until then a gap guesses them (`solidEdges`).
     private var edgesKnown = false
@@ -73,7 +79,8 @@ public actor Stitcher {
     /// The fixed edges detected so far.
     public var fixedEdges: FixedEdges { edges }
 
-    /// Sets the auto-scroll step in pixels (nil while scrolling manually).
+    /// Sets the pixels auto-scroll moved the content since the previous frame (nil while scrolling
+    /// manually). Only breaks ties on repetitive content, and only when it matches one offset.
     public func setExpectedStep(_ step: Int?) {
         expectedStep = step
     }
@@ -99,20 +106,27 @@ public actor Stitcher {
         let hashes = frame.lineHashes(along: axis)
         let next = Accepted(image: image, frame: frame, hashes: hashes, position: 0)
 
-        switch align(next, to: last) {
+        let alignment = align(next, to: last)
+        switch alignment {
         case .noMovement:
             pending = nil
             return .noMovement
         case .offset(let offset):
             pending = nil
             return appendStrip(of: next, offset: offset, after: last)
-        case .unrelated:
-            guard let gap = pending else {
-                pending = next
-                return .unrelated
+        case .unrelated, .ambiguous:
+            let reason: Hold = alignment == .ambiguous ? .ambiguous : .unrelated
+            guard let held = pending else {
+                pending = (next, reason)
+                return reason == .ambiguous ? .ambiguous : .unrelated
+            }
+            // Still ambiguous against the held frame too: it may overlap either, so keep waiting.
+            if held.reason == .ambiguous, [.ambiguous, .noMovement].contains(align(next, to: held.frame)) {
+                pending = (next, .ambiguous)
+                return .ambiguous
             }
             pending = nil
-            return appendJump(held: gap, then: next)
+            return appendJump(held: held.frame, then: next)
         }
     }
 
@@ -130,7 +144,9 @@ public actor Stitcher {
         case .noMovement:
             break
         case .unrelated:
-            pending = next
+            pending = (next, .unrelated)
+        case .ambiguous:
+            pending = (next, .ambiguous)
         }
         return .gapDetected(lines: lines)
     }
@@ -144,11 +160,13 @@ public actor Stitcher {
         band.leading = min(band.leading, length / 3)
         band.trailing = min(band.trailing, length / 3)
         let range = band.leading..<(length - band.trailing)
-        let hint = aligner.usesVision
-            ? FrameAligner.visionOffset(previous: previous.image, next: next.image, axis: axis) : nil
-        let prior = FrameAligner.Prior(expectedStep: expectedStep, previousStep: previousStep)
+        let usesVision = aligner.usesVision
+        let axis = axis
+        let hint = {
+            usesVision ? FrameAligner.visionOffset(previous: previous.image, next: next.image, axis: axis) : nil
+        }
         return aligner.align(previous: Array(previous.hashes[range]), next: Array(next.hashes[range]),
-                             hint: hint, prior: prior)
+                             hint: hint, prior: FrameAligner.Prior(expectedStep: expectedStep))
     }
 
     /// Appends the strip `next` reveals beyond `previous`, `offset` lines further on.
@@ -160,7 +178,6 @@ public actor Stitcher {
         edgesKnown = true
         let canvas = self.canvas ?? seedCanvas(with: first.frame)
         self.last = accepted
-        previousStep = offset
 
         // New lines: past what the canvas already holds, inside the moving (non-fixed) band.
         let length = next.frame.length(along: axis)
@@ -181,6 +198,7 @@ public actor Stitcher {
 
     /// Appends a seam marker and the whole moving band of `gap`, which becomes the new anchor
     /// (returned, repositioned in content coordinates) along with the lines added.
+    @discardableResult
     private func appendGap(_ gap: Accepted) -> (accepted: Accepted, lines: Int) {
         guard let first, let previous = last else { return (gap, 0) }
         if !edgesKnown { edges = Self.solidEdges(previous.hashes, gap.hashes) }
@@ -198,7 +216,6 @@ public actor Stitcher {
         canvasEnd = position + start + count
         let anchor = Accepted(image: gap.image, frame: gap.frame, hashes: gap.hashes, position: position)
         last = anchor
-        previousStep = nil
         if canvas.length >= maxLength - edges.trailing { isFull = true }
         return (anchor, seam + count)
     }
@@ -206,15 +223,24 @@ public actor Stitcher {
     /// The stitched image so far, for live preview. Nil before the first frame.
     public func currentImage() -> CGImage? { compose() }
 
+    /// True while a frame is held back (see the type notes); `finish()` would keep it after a seam.
+    public var hasHeldFrame: Bool { pending != nil }
+
     /// The final stitched image, header once at the start and footer once at the end.
-    public func finish() -> CGImage? { compose() }
+    /// A frame still held back (the user stopped right after a fast scroll) is kept after a seam.
+    public func finish() -> CGImage? {
+        if let held = pending, !isFull {
+            pending = nil
+            appendGap(held.frame)
+        }
+        return compose()
+    }
 
     /// Clears all frames to start a new capture.
     public func reset() {
         first = nil
         last = nil
         pending = nil
-        previousStep = nil
         edges = .none
         edgesKnown = false
         canvas = nil

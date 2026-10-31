@@ -16,6 +16,10 @@ final class ScrollingPanelModel {
     var hint: String?
 
     static let gapHint = "Scrolled too fast: a gap is marked. Scroll slower."
+    /// A frame is held back because it didn't overlap the last one (#71).
+    static let heldHint = "Scrolled too fast to line up. Slow down, or a gap will be marked."
+    /// A frame is held back because repeating rows matched at several offsets (#70).
+    static let repeatHint = "Repeating rows can't be lined up here; a gap may be marked."
 
     @ObservationIgnored var onStart: () -> Void = {}
     @ObservationIgnored var onStop: () -> Void = {}

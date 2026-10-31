@@ -51,8 +51,8 @@ public struct AutoScrollStopRule: Equatable, Sendable {
         case .started, .appended, .gapDetected:
             stillFrames = 0
             return nil
-        case .unrelated:
-            return nil // a transient (animation, lazy load); neither progress nor the end
+        case .unrelated, .ambiguous:
+            return nil // held back; neither progress nor the end
         }
     }
 }
@@ -86,6 +86,8 @@ public final class AutoScroller {
     private let poster: any ScrollEventPosting
     private var rule = AutoScrollStopRule()
     private var task: Task<Void, Never>?
+    /// Points posted since the last `takePostedDistance()`.
+    private var posted = 0
 
     public init(axis: ScrollAxis = .vertical, step: Int = 120, interval: Duration = .milliseconds(150),
                 poster: any ScrollEventPosting = SystemScrollEventPoster()) {
@@ -105,14 +107,23 @@ public final class AutoScroller {
             return state
         }
         rule = AutoScrollStopRule()
+        posted = 0
         state = .scrolling
         task = Task { [weak self] in
             while let self, self.state == .scrolling, !Task.isCancelled {
                 self.poster.postScroll(at: point, axis: self.axis, delta: self.step)
+                self.posted += self.step
                 try? await Task.sleep(for: self.interval)
             }
         }
         return state
+    }
+
+    /// Points scrolled since the last call. The frame timer and the scroll timer drift, so a
+    /// frame can see zero, one or two steps; this tells the stitcher which.
+    public func takePostedDistance() -> Int {
+        defer { posted = 0 }
+        return posted
     }
 
     /// Feeds a stitcher outcome; stops scrolling when a stop condition is met.
