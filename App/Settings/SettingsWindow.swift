@@ -10,6 +10,8 @@ struct SettingsView: View {
         TabView {
             GeneralSettingsPane(settings: settings)
                 .tabItem { Label("General", systemImage: "gearshape") }
+            QuickAccessSettingsPane(settings: settings)
+                .tabItem { Label("Quick Access", systemImage: "rectangle.stack") }
             ShortcutsSettingsPane()
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
             TextRecognitionSettingsPane(settings: settings)

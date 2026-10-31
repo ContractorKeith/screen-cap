@@ -98,6 +98,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installFeatures() {
         sinkRouter.pin = pins
         textCapture.install()
+        sinkRouter.overlay = QuickAccessController(settings: settings, output: coordinator.output,
+                                                   history: coordinator.history, router: sinkRouter)
     }
 
     private lazy var pins: PinController = {

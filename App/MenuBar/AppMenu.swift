@@ -1,3 +1,4 @@
+import Foundation
 import ScreenCapKit
 
 /// The status menu's contents. Add a row here to add a menu item.
@@ -32,6 +33,9 @@ enum AppMenu {
                 .item(MenuAction("Pin from Clipboard", perform: actions.pinFromClipboard)),
                 .item(MenuAction("Unlock All Pins", perform: actions.unlockAllPins))
             ]),
+            .item(MenuAction("Hide Overlays", shortcut: .toggleOverlays, isOn: { QuickAccessVisibility.isHidden },
+                             perform: post(.toggleOverlaysRequested))),
+            .item(MenuAction("Restore Recently Closed", perform: post(.restoreRecentlyClosedRequested))),
             .separator,
             .item(MenuAction("Screen Recording Permission…", perform: actions.openOnboarding)),
             .item(MenuAction("Launch at Login", isOn: actions.launchAtLoginIsOn, perform: actions.toggleLaunchAtLogin)),
@@ -39,6 +43,11 @@ enum AppMenu {
             .separator,
             .item(MenuAction("Quit ScreenCap", keyEquivalent: "q", perform: actions.quit))
         ]
+    }
+
+    /// A row that asks a feature to act by posting its notification (Quick Access observes these).
+    private static func post(_ name: Notification.Name) -> @MainActor () -> Void {
+        { NotificationCenter.default.post(name: name, object: nil) }
     }
 
     private static func capture(_ title: String, _ kind: CaptureKind, _ actions: Actions) -> MenuEntry {
