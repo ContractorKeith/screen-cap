@@ -12,14 +12,22 @@ final class SelectionOverlay {
     let geometry: DisplayGeometry
     let picker: WindowPicker
     private let stills: [CapturedImage]
+    private let sampler: PixelSampler?
+    /// Latest live region under the pointer when the magnifier samples live (#90).
+    private(set) var liveSample: CapturedImage?
+    private var sampleThrottle = LiveSampleThrottle()
+    private var sampleTimer: Timer?
+    private var finished = false
     private(set) var views: [SelectionView] = []
     private var panels: [OverlayPanel] = []
     private var continuation: CheckedContinuation<SelectionOutcome, Never>?
     var toolbar: AllInOneToolbar?
     var sizeField: FixedSizeField?
 
-    init(stills: [CapturedImage], geometry: DisplayGeometry, windows: [ShareableWindow], options: SelectionOptions) {
+    init(stills: [CapturedImage], geometry: DisplayGeometry, windows: [ShareableWindow], options: SelectionOptions,
+         sampler: PixelSampler? = nil) {
         self.stills = stills
+        self.sampler = sampler
         self.geometry = geometry
         self.options = options
         self.picker = WindowPicker(windows: windows)
@@ -40,7 +48,7 @@ final class SelectionOverlay {
         for display in geometry.displays {
             let still = stills.first { $0.displayID == display.id }
             let panel = OverlayPanel(frame: display.frame)
-            let view = SelectionView(display: display, still: still, overlay: self)
+            let view = SelectionView(display: display, overlay: self)
             panel.contentView = Self.container(for: view, still: options.showsStill ? still : nil, display: display)
             panel.orderFrontRegardless()
             panels.append(panel)
@@ -48,6 +56,7 @@ final class SelectionOverlay {
         }
         focusPanel(at: state.mouse)
         NSCursor.crosshair.push()
+        startLiveSampling()
         let mode = String(describing: state.mode)
         appLog.notice("Selection overlay on \(self.panels.count) display(s), mode \(mode, privacy: .public)")
     }
@@ -80,6 +89,49 @@ final class SelectionOverlay {
         return views.first { $0.display.id == display?.id } ?? views.first
     }
 
+    /// Pixels the magnifier reads on `display`: its frozen still, or the live sample taken there.
+    func magnifierImage(for display: DisplayInfo) -> CapturedImage? {
+        switch options.magnifier {
+        case .off: nil
+        case .frozenStill: stills.first { $0.displayID == display.id }
+        case .live: liveSample.flatMap { $0.displayID == display.id ? $0 : nil }
+        }
+    }
+
+    // MARK: - Live magnifier sampling
+
+    /// Refreshes on a timer too, so a still pointer over changing content stays current.
+    private func startLiveSampling() {
+        guard options.magnifier == .live, sampler != nil else { return }
+        requestLiveSample()
+        let timer = Timer(timeInterval: sampleThrottle.interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.requestLiveSample() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        sampleTimer = timer
+    }
+
+    /// Starts a small region grab under the pointer unless one is in flight or one started too recently.
+    func requestLiveSample() {
+        guard !finished, options.magnifier == .live, let sampler,
+              state.mode == .area, !state.toolbarVisible,
+              let display = geometry.display(containing: state.mouse),
+              let rect = LiveSample.rect(around: state.mouse, in: display.frame),
+              sampleThrottle.begin(now: ProcessInfo.processInfo.systemUptime) else { return }
+        Task { [weak self] in
+            let image = await sampler.sample(pointRect: rect, display: display)
+            self?.acceptLiveSample(image)
+        }
+    }
+
+    /// A finished live grab; nil (a failed grab) keeps the previous sample.
+    func acceptLiveSample(_ image: CapturedImage?) {
+        sampleThrottle.end()
+        guard let image, !finished else { return }
+        liveSample = image
+        redraw()
+    }
+
     func redraw() {
         views.forEach { $0.needsDisplay = true }
     }
@@ -88,6 +140,10 @@ final class SelectionOverlay {
     func finish(_ outcome: SelectionOutcome) {
         guard let continuation else { return }
         self.continuation = nil
+        finished = true
+        sampleTimer?.invalidate()
+        sampleTimer = nil
+        liveSample = nil
         NSCursor.pop()
         toolbar?.removeFromSuperview()
         sizeField?.removeFromSuperview()

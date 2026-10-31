@@ -20,6 +20,7 @@ extension SelectionOverlay {
                 state.rect = SelectionMath.fixedRect(size: size, centeredAt: point, within: display.frame)
             }
         }
+        requestLiveSample()
         redraw()
     }
 
@@ -44,6 +45,7 @@ extension SelectionOverlay {
 
     func mouseDragged(to point: CGPoint, shift: Bool) {
         state.mouse = point
+        requestLiveSample()
         guard state.dragStart != nil else { return }
         updateDrag(shift: shift)
     }
