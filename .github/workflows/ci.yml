@@ -20,6 +20,15 @@ jobs:
           swift --version
       - name: Build
         run: swift build
+      - name: Test (effects suites, diagnostic)
+        timeout-minutes: 12
+        run: |
+          swift build --build-tests
+          for suite in AutoBalanceTests SpotlightTests BackgroundCompositorTests RedactionTests; do
+            echo "::group::$suite"
+            perl -e 'alarm 120; exec @ARGV' swift test --skip-build --filter "ScreenCapKitTests.$suite" 2>&1 | tail -20 || echo "$suite: TIMED OUT or FAILED"
+            echo "::endgroup::"
+          done
       - name: Test
         timeout-minutes: 15
         run: swift test
