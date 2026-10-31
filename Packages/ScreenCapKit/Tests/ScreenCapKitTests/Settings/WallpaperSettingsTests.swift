@@ -37,22 +37,22 @@ struct WallpaperSettingsTests {
     }
 
     @Test func specFallsBackToGradientWithoutImage() {
-        let spec = WallpaperOptions(style: .desktop, padding: 500).backgroundSpec(image: nil)
+        let spec = WallpaperOptions(style: .desktop, padding: 500).background(hasImage: false)
         guard case .linearGradient(let stops, _) = spec.fill else {
             Issue.record("expected gradient")
             return
         }
         #expect(stops.count == 2)
-        #expect(spec.padding == EffectsInsets(all: 200))
+        #expect(spec.padding == 200)
     }
 
     @Test func solidSpec() {
-        let spec = WallpaperOptions(style: .solid, solidColor: .white, padding: 10).backgroundSpec(image: nil)
+        let spec = WallpaperOptions(style: .solid, solidColor: .white, padding: 10).background(hasImage: false)
         guard case .solid(let color) = spec.fill else {
             Issue.record("expected solid")
             return
         }
         #expect(color == .white)
-        #expect(spec.padding == EffectsInsets(all: 10))
+        #expect(spec.padding == 10)
     }
 }

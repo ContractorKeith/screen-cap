@@ -84,7 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openOnboarding: { [weak self] in self?.onboarding.show() },
             toggleLaunchAtLogin: { LaunchAtLogin.toggle() },
             launchAtLoginIsOn: { LaunchAtLogin.isEnabled },
-            quit: { NSApp.terminate(nil) }
+            quit: { NSApp.terminate(nil) },
+            pinFromClipboard: { [weak self] in self?.pins.pinFromClipboard() },
+            unlockAllPins: { [weak self] in self?.pins.unlockAll() }
         )
     }
 
@@ -122,7 +124,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow.history = history // Screenshots, Wallpaper, Advanced, About panes (#28)
         _ = historyWindow // History window, opens on .openHistoryRequested (#28)
         coordinator.desktopIcons = desktopIcons // Hide desktop icons while capturing (#28)
+        ScrollingCaptureController.install(on: coordinator)
+        sinkRouter.pin = pins
+        textCapture.install()
+        sinkRouter.overlay = QuickAccessController(settings: settings, output: coordinator.output,
+                                                   history: coordinator.history, router: sinkRouter)
     }
+
+    private lazy var pins: PinController = {
+        let pins = PinController(output: coordinator.output)
+        pins.install()
+        return pins
+    }()
+    private lazy var textCapture = TextCaptureController(
+        settings: settings, service: coordinator.service, history: coordinator.history
+    )
 
     private static func openHistory(retentionDays: Int) -> HistoryStore? {
         do {

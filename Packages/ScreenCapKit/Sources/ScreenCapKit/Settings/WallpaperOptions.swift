@@ -13,7 +13,7 @@ public struct WallpaperOptions: Codable, Equatable, Sendable {
     public var solidColor: RGBAColor
     public var gradientStart: RGBAColor
     public var gradientEnd: RGBAColor
-    /// Degrees, clockwise from left→right (90 = top→bottom), as in `BackgroundSpec.Fill`.
+    /// Degrees, clockwise from left→right (90 = top→bottom), as in `Document.BackgroundFill`.
     public var gradientAngle: Double
     /// Custom image for `.image`.
     public var imageURL: URL?
@@ -40,35 +40,32 @@ public struct WallpaperOptions: Codable, Equatable, Sendable {
         self.padding = padding
     }
 
-    /// A compositor spec for these options. `image` is the decoded desktop picture or custom
-    /// image for `.desktop` / `.image`; without one those styles fall back to the gradient.
-    public func backgroundSpec(image: CGImage?) -> BackgroundSpec {
+    /// Layer name the compositor looks up for `.desktop` / `.image` fills.
+    public static let imageLayerName = "wallpaper"
+
+    /// The `Document.Background` for these options. `hasImage` says whether the caller will
+    /// supply the decoded desktop picture or custom image under `imageLayerName` in `layers`;
+    /// without one the `.desktop` / `.image` styles fall back to the gradient.
+    public func background(hasImage: Bool) -> Document.Background {
         let clamped = min(max(padding, Self.paddingRange.lowerBound), Self.paddingRange.upperBound)
-        return BackgroundSpec(fill: fill(image: image), padding: EffectsInsets(all: CGFloat(clamped)))
+        return Document.Background(fill: fill(hasImage: hasImage), padding: clamped)
     }
 
-    private func fill(image: CGImage?) -> BackgroundSpec.Fill {
+    private func fill(hasImage: Bool) -> Document.BackgroundFill {
         switch style {
         case .solid:
-            return .solid(EffectsColor(solidColor))
+            return .solid(color: solidColor)
         case .desktop, .image:
-            if let image { return .image(image) }
-            return gradientFill
+            return hasImage ? .customImage(layerName: Self.imageLayerName) : gradientFill
         case .gradient:
             return gradientFill
         }
     }
 
-    private var gradientFill: BackgroundSpec.Fill {
+    private var gradientFill: Document.BackgroundFill {
         .linearGradient(stops: [
-            EffectsGradientStop(color: EffectsColor(gradientStart), location: 0),
-            EffectsGradientStop(color: EffectsColor(gradientEnd), location: 1)
+            Document.GradientStop(color: gradientStart, location: 0),
+            Document.GradientStop(color: gradientEnd, location: 1)
         ], angle: gradientAngle)
-    }
-}
-
-extension EffectsColor {
-    init(_ color: RGBAColor) {
-        self.init(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
     }
 }

@@ -1,11 +1,12 @@
 import Foundation
 
-/// Requests the URL scheme and History hand to features other workers own.
+/// Cross-feature requests (URL scheme, History, Quick Access, pins, editor).
 /// Posted on `NotificationCenter.default`; see docs/url-scheme.md for each payload.
 extension Notification.Name {
-    /// Open an image in the editor. userInfo: `url` (file URL); absent means "ask for a file".
+    /// Open an image in the editor. userInfo: `url` (file URL) or `result` (CaptureResult);
+    /// neither means "ask for a file".
     static let openAnnotateRequested = Notification.Name("ScreenCapOpenAnnotateRequested")
-    /// Pin an image. userInfo: `url` (file URL); absent means "ask for a file".
+    /// Pin an image. userInfo: `url` (file URL) or `result` (CaptureResult); neither means "ask for a file".
     static let pinRequested = Notification.Name("ScreenCapPinRequested")
     /// Show an image in Quick Access. userInfo: `url` (file URL), optional `recordID` (UUID).
     static let addQuickAccessOverlayRequested = Notification.Name("ScreenCapAddQuickAccessOverlayRequested")

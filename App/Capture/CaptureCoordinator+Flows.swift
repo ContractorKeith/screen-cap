@@ -23,7 +23,14 @@ extension CaptureCoordinator {
             } else {
                 try await select(flow, windows: windows)
             }
-        case .area, .window, .allInOne, .scrolling, .text:
+        case .scrolling:
+            if let rect = scrollingRegion {
+                scrollingRegion = nil
+                await scroll(rect, flow)
+            } else {
+                try await select(flow, windows: windows)
+            }
+        case .area, .window, .allInOne, .text:
             try await select(flow, windows: windows)
         }
     }
@@ -114,7 +121,7 @@ extension CaptureCoordinator {
     private func captureSelectedArea(_ rect: CGRect, stills: [CapturedImage], _ flow: Flow) async throws {
         switch flow.kind {
         case .scrolling:
-            post(.scrollingCaptureRequested, rect: rect)
+            await scroll(rect, flow)
         case .text:
             post(.captureTextRequested, rect: rect)
         case .selfTimer:
@@ -138,7 +145,7 @@ extension CaptureCoordinator {
                 await deliver(try await service.captureDisplay(display.id), flow, as: .fullscreen)
             }
         case .scrolling:
-            post(.scrollingCaptureRequested, rect: rect)
+            await scroll(rect, flow)
         case .text:
             post(.captureTextRequested, rect: rect)
         case .timer:
@@ -183,6 +190,13 @@ extension CaptureCoordinator {
             throw CaptureError.areaOffScreen(CGRect(origin: mouse, size: .zero))
         }
         await deliver(try await service.captureDisplay(display.id), flow)
+    }
+
+    /// Scrolling capture runs inside this capture task, so `--quit` waits for it.
+    private func scroll(_ rect: CGRect, _ flow: Flow) async {
+        guard let scrollingHandler else { return post(.scrollingCaptureRequested, rect: rect) }
+        try? await Task.sleep(for: Self.overlayHideDelay)
+        await scrollingHandler(rect, flow.context, flow.action)
     }
 
     /// Hands a region to a feature another worker owns (scrolling, OCR).

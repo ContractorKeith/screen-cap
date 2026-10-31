@@ -30,9 +30,18 @@ struct SettingsView: View {
             ShortcutsSettingsPane()
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
                 .tag(AutomationCommand.SettingsTab.shortcuts.rawValue)
+            QuickAccessSettingsPane(settings: settings)
+                .tabItem { Label("Quick Access", systemImage: "rectangle.stack") }
+                .tag(AutomationCommand.SettingsTab.quickAccess.rawValue)
             ScreenshotsSettingsPane(settings: settings)
                 .tabItem { Label("Screenshots", systemImage: "camera.viewfinder") }
                 .tag(AutomationCommand.SettingsTab.screenshots.rawValue)
+            ScrollingSettingsPane(settings: .shared)
+                .tabItem { Label("Scrolling", systemImage: "scroll") }
+                .tag("scrolling")
+            TextRecognitionSettingsPane(settings: settings)
+                .tabItem { Label("Text Recognition", systemImage: "text.viewfinder") }
+                .tag("text")
             WallpaperSettingsPane(settings: settings)
                 .tabItem { Label("Wallpaper", systemImage: "photo.on.rectangle") }
                 .tag(AutomationCommand.SettingsTab.wallpaper.rawValue)

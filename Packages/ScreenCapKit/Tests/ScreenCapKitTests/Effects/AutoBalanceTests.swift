@@ -4,7 +4,7 @@ import Testing
 
 @Suite("AutoBalance")
 struct AutoBalanceTests {
-    static let dark = EffectsColor(red: 0.15, green: 0.2, blue: 0.3)
+    static let dark = RGBAColor(red: 0.15, green: 0.2, blue: 0.3)
 
     /// Each edge within 2 px of the expected value (PLAN §7 M4 acceptance).
     static func expectClose(_ actual: EffectsInsets, _ expected: EffectsInsets) {
@@ -15,7 +15,7 @@ struct AutoBalanceTests {
     }
 
     /// Fills a top-left-origin rect in a CG (bottom-left) context of the given height.
-    static func fill(_ rect: CGRect, height: Int, color: EffectsColor, in context: CGContext) {
+    static func fill(_ rect: CGRect, height: Int, color: RGBAColor, in context: CGContext) {
         context.setFillColor(color.cgColor)
         context.fill(CGRect(x: rect.minX, y: CGFloat(height) - rect.maxY, width: rect.width, height: rect.height))
     }
@@ -42,11 +42,12 @@ struct AutoBalanceTests {
 
     @Test func bottomHeavyWindowShadow() throws {
         let window = CGRect(x: 50, y: 30, width: 200, height: 150)
-        let shadow = EffectsShadow(offset: CGSize(width: 0, height: 12), blur: 24, opacity: 0.5)
+        let shadow = Document.Shadow(color: RGBAColor(red: 0, green: 0, blue: 0, alpha: 0.5), radius: 24,
+                                     offset: CGSize(width: 0, height: 12))
         let image = try EffectsFixtures.image(width: 300, height: 260, fill: nil) { context in
             context.setShadow(
-                offset: CGSize(width: 0, height: -shadow.offset.height), blur: shadow.blur,
-                color: EffectsColor(red: 0, green: 0, blue: 0, alpha: shadow.opacity).cgColor
+                offset: CGSize(width: 0, height: -shadow.offset.height), blur: shadow.radius,
+                color: shadow.color.cgColor
             )
             Self.fill(window, height: 260, color: .white, in: context)
         }

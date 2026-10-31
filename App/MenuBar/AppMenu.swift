@@ -1,3 +1,4 @@
+import Foundation
 import ScreenCapKit
 
 /// The status menu's contents. Add a row here to add a menu item.
@@ -16,6 +17,8 @@ enum AppMenu {
         var toggleLaunchAtLogin: @MainActor () -> Void
         var launchAtLoginIsOn: @MainActor () -> Bool
         var quit: @MainActor () -> Void
+        var pinFromClipboard: @MainActor () -> Void = {}
+        var unlockAllPins: @MainActor () -> Void = {}
     }
 
     static func entries(_ actions: Actions) -> [MenuEntry] {
@@ -28,8 +31,14 @@ enum AppMenu {
                 capture("Capture Previous Area", .previousArea, actions),
                 .submenu("Self-Timer", selfTimerEntries(actions)),
                 capture("Scrolling Capture", .scrolling, actions),
-                capture("Capture Text", .text, actions)
+                capture("Capture Text", .text, actions),
+                .separator,
+                .item(MenuAction("Pin from Clipboard", perform: actions.pinFromClipboard)),
+                .item(MenuAction("Unlock All Pins", perform: actions.unlockAllPins))
             ]),
+            .item(MenuAction("Hide Overlays", shortcut: .toggleOverlays, isOn: { QuickAccessVisibility.isHidden },
+                             perform: post(.toggleOverlaysRequested))),
+            .item(MenuAction("Restore Recently Closed", perform: post(.restoreRecentlyClosedRequested))),
             .separator,
             .item(MenuAction("History…", shortcut: .openHistory, perform: actions.openHistory)),
             .item(MenuAction("Hide Desktop Icons", isOn: actions.desktopIconsHidden,
@@ -41,6 +50,11 @@ enum AppMenu {
             .separator,
             .item(MenuAction("Quit ScreenCap", keyEquivalent: "q", perform: actions.quit))
         ]
+    }
+
+    /// A row that asks a feature to act by posting its notification (Quick Access observes these).
+    private static func post(_ name: Notification.Name) -> @MainActor () -> Void {
+        { NotificationCenter.default.post(name: name, object: nil) }
     }
 
     private static func capture(_ title: String, _ kind: CaptureKind, _ actions: Actions) -> MenuEntry {

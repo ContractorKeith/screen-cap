@@ -2,89 +2,47 @@
 import CoreGraphics
 import Foundation
 
-/// One color stop of a linear gradient. `location` is 0...1.
-public struct EffectsGradientStop: Equatable, Sendable {
-    public var color: EffectsColor
-    public var location: Double
-
-    public init(color: EffectsColor, location: Double) {
-        self.color = color
-        self.location = location
-    }
-}
-
-/// Where the screenshot sits when the canvas grows beyond its padding (aspect ratio).
-public enum EffectsAlignment: Sendable {
-    case topLeading, top, topTrailing
-    case leading, center, trailing
-    case bottomLeading, bottom, bottomTrailing
-
+extension Document.Alignment {
     /// Fraction of extra space placed before the image on each axis (0, 0.5 or 1).
     var factors: CGPoint {
         switch self {
-        case .topLeading: return CGPoint(x: 0, y: 0)
+        case .topLeft: return CGPoint(x: 0, y: 0)
         case .top: return CGPoint(x: 0.5, y: 0)
-        case .topTrailing: return CGPoint(x: 1, y: 0)
-        case .leading: return CGPoint(x: 0, y: 0.5)
+        case .topRight: return CGPoint(x: 1, y: 0)
+        case .left: return CGPoint(x: 0, y: 0.5)
         case .center: return CGPoint(x: 0.5, y: 0.5)
-        case .trailing: return CGPoint(x: 1, y: 0.5)
-        case .bottomLeading: return CGPoint(x: 0, y: 1)
+        case .right: return CGPoint(x: 1, y: 0.5)
+        case .bottomLeft: return CGPoint(x: 0, y: 1)
         case .bottom: return CGPoint(x: 0.5, y: 1)
-        case .bottomTrailing: return CGPoint(x: 1, y: 1)
+        case .bottomRight: return CGPoint(x: 1, y: 1)
         }
     }
 }
 
-public struct BackgroundSpec {
-    public enum Fill {
-        case solid(EffectsColor)
-        /// `angle` in degrees, clockwise from left→right (90 = top→bottom).
-        case linearGradient(stops: [EffectsGradientStop], angle: Double)
-        /// Drawn aspect-fill across the whole canvas.
-        case image(CGImage)
-    }
-
-    public var fill: Fill
-    public var padding: EffectsInsets
-    public var cornerRadius: CGFloat
-    public var shadow: EffectsShadow?
-    public var alignment: EffectsAlignment
-    /// Target width / height. The canvas only grows to reach it, never crops.
-    public var aspectRatio: CGFloat?
-
-    public init(
-        fill: Fill,
-        padding: EffectsInsets = EffectsInsets(all: 64),
-        cornerRadius: CGFloat = 0,
-        shadow: EffectsShadow? = nil,
-        alignment: EffectsAlignment = .center,
-        aspectRatio: CGFloat? = nil
-    ) {
-        self.fill = fill
-        self.padding = padding
-        self.cornerRadius = cornerRadius
-        self.shadow = shadow
-        self.alignment = alignment
-        self.aspectRatio = aspectRatio
-    }
-}
-
+/// Composites a screenshot onto a `Document.Background`, growing the canvas to fit.
+///
+/// Two inputs the document model doesn't store are render-time options: per-edge `padding`
+/// (Auto Balance output; nil uses `background.padding` on every edge) and `aspectRatio`
+/// (width / height; the canvas only grows to reach it, never crops).
 public enum BackgroundCompositor {
-    /// Canvas size and the screenshot's frame (top-left pixels) for `spec`.
-    public static func layout(imageSize: CGSize, spec: BackgroundSpec) -> (canvas: CGSize, frame: CGRect) {
-        let pad = spec.padding
+    /// Canvas size and the screenshot's frame (top-left pixels).
+    public static func layout(
+        imageSize: CGSize, background: Document.Background, padding: EffectsInsets? = nil,
+        aspectRatio: CGFloat? = nil
+    ) -> (canvas: CGSize, frame: CGRect) {
+        let pad = padding ?? EffectsInsets(all: background.padding)
         var width = (imageSize.width + pad.left + pad.right).rounded()
         var height = (imageSize.height + pad.top + pad.bottom).rounded()
         let baseWidth = width
         let baseHeight = height
-        if let ratio = spec.aspectRatio, ratio > 0 {
+        if let ratio = aspectRatio, ratio > 0 {
             if width / height < ratio {
                 width = (height * ratio).rounded(.up)
             } else {
                 height = (width / ratio).rounded(.up)
             }
         }
-        let factors = spec.alignment.factors
+        let factors = background.alignment.factors
         let origin = CGPoint(
             x: (pad.left + (width - baseWidth) * factors.x).rounded(),
             y: (pad.top + (height - baseHeight) * factors.y).rounded()
@@ -92,15 +50,20 @@ public enum BackgroundCompositor {
         return (CGSize(width: width, height: height), CGRect(origin: origin, size: imageSize))
     }
 
-    /// Composites `image` onto the background described by `background`.
-    public static func render(_ image: CGImage, background: BackgroundSpec) throws -> CGImage {
+    /// Composites `image` onto `background`. Bundled and custom image fills are looked up by
+    /// name in `layers`; a missing one leaves the canvas transparent behind the screenshot.
+    public static func render(
+        _ image: CGImage, background: Document.Background, layers: [String: CGImage] = [:],
+        padding: EffectsInsets? = nil, aspectRatio: CGFloat? = nil
+    ) throws -> CGImage {
         let imageSize = CGSize(width: image.width, height: image.height)
-        let (canvas, frame) = layout(imageSize: imageSize, spec: background)
+        let (canvas, frame) = layout(imageSize: imageSize, background: background, padding: padding,
+                                     aspectRatio: aspectRatio)
         let bitmap = try EffectsBitmap(width: Int(canvas.width), height: Int(canvas.height))
         let context = bitmap.context
         let full = CGRect(origin: .zero, size: canvas)
 
-        drawFill(background.fill, in: bitmap, rect: full)
+        drawFill(background.fill, layers: layers, in: bitmap, rect: full)
 
         let target = bitmap.cgRect(frame)
         let radius = min(background.cornerRadius, min(frame.width, frame.height) / 2)
@@ -108,12 +71,10 @@ public enum BackgroundCompositor {
 
         context.saveGState()
         if let shadow = background.shadow {
-            var color = shadow.color
-            color.alpha *= shadow.opacity
-            // Shadow offsets are in base space (y up); our offset is y down.
+            // Shadow offsets are in base space (y up); the model's offset is y down.
             context.setShadow(
                 offset: CGSize(width: shadow.offset.width, height: -shadow.offset.height),
-                blur: shadow.blur, color: color.cgColor
+                blur: shadow.radius, color: shadow.color.cgColor
             )
         }
         // The transparency layer lets the shadow follow the clipped, rounded image.
@@ -127,7 +88,9 @@ public enum BackgroundCompositor {
         return try bitmap.makeImage()
     }
 
-    private static func drawFill(_ fill: BackgroundSpec.Fill, in bitmap: EffectsBitmap, rect: CGRect) {
+    private static func drawFill(
+        _ fill: Document.BackgroundFill, layers: [String: CGImage], in bitmap: EffectsBitmap, rect: CGRect
+    ) {
         let context = bitmap.context
         switch fill {
         case .solid(let color):
@@ -135,7 +98,8 @@ public enum BackgroundCompositor {
             context.fill(rect)
         case .linearGradient(let stops, let angle):
             drawGradient(stops: stops, angle: angle, in: context, rect: rect)
-        case .image(let fillImage):
+        case .bundled(let name), .customImage(let name):
+            guard let fillImage = layers[name] else { return }
             let scale = max(rect.width / CGFloat(fillImage.width), rect.height / CGFloat(fillImage.height))
             let size = CGSize(width: CGFloat(fillImage.width) * scale, height: CGFloat(fillImage.height) * scale)
             let origin = CGPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2)
@@ -145,7 +109,7 @@ public enum BackgroundCompositor {
     }
 
     private static func drawGradient(
-        stops: [EffectsGradientStop], angle: Double, in context: CGContext, rect: CGRect
+        stops: [Document.GradientStop], angle: Double, in context: CGContext, rect: CGRect
     ) {
         guard let first = stops.first else { return }
         let sorted = stops.count == 1 ? [first, first] : stops.sorted { $0.location < $1.location }
@@ -154,9 +118,9 @@ public enum BackgroundCompositor {
             colors: sorted.map(\.color.cgColor) as CFArray,
             locations: sorted.map { CGFloat($0.location) }
         ) else { return }
-        // Direction in CG space: clockwise in top-left space is clockwise-negative in y-up space.
+        // Model convention: 0 = left to right, 90 = bottom to top. CG space here is y up.
         let radians = angle * .pi / 180
-        let direction = CGVector(dx: cos(radians), dy: -sin(radians))
+        let direction = CGVector(dx: cos(radians), dy: sin(radians))
         let half = (abs(rect.width * direction.dx) + abs(rect.height * direction.dy)) / 2
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let start = CGPoint(x: center.x - direction.dx * half, y: center.y - direction.dy * half)
