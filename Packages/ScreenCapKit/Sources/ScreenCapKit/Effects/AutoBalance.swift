@@ -44,7 +44,7 @@ public enum AutoBalance {
     /// content shifts against the shadow offset by half of it, since the shadow pulls visual
     /// weight its way (usually down).
     public static func padding(
-        for image: CGImage, shadow: EffectsShadow? = nil, minimum: CGFloat = 48
+        for image: CGImage, shadow: Document.Shadow? = nil, minimum: CGFloat = 48
     ) throws -> EffectsInsets {
         let size = CGSize(width: image.width, height: image.height)
         let content = try contentBounds(in: image) ?? CGRect(origin: .zero, size: size)

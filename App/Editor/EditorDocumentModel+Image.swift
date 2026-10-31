@@ -106,9 +106,7 @@ extension EditorDocumentModel {
 
     /// Auto Balance (PLAN §5.5): padding and alignment that visually center the content.
     func autoBalance() {
-        let shadow = document.background?.shadow.map {
-            EffectsShadow(offset: $0.offset, blur: $0.radius, opacity: $0.color.alpha)
-        }
+        let shadow = document.background?.shadow
         guard let insets = try? AutoBalance.padding(for: baseImage, shadow: shadow) else { return }
         let balanced = BackgroundMath.balanced(insets)
         perform { snapshot in

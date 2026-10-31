@@ -11,6 +11,7 @@ struct MenuModelTests {
         var timers: [Int] = []
         var calls: [String] = []
         var timerSeconds = 5
+        var iconsHidden = false
     }
 
     private func actions(_ recorder: Recorder) -> AppMenu.Actions {
@@ -19,6 +20,9 @@ struct MenuModelTests {
             selfTimer: { recorder.timers.append($0) },
             selfTimerSeconds: { recorder.timerSeconds },
             openSettings: { recorder.calls.append("settings") },
+            openHistory: { recorder.calls.append("history") },
+            toggleDesktopIcons: { recorder.calls.append("icons") },
+            desktopIconsHidden: { recorder.iconsHidden },
             openOnboarding: { recorder.calls.append("onboarding") },
             toggleLaunchAtLogin: { recorder.calls.append("login") },
             launchAtLoginIsOn: { true },
@@ -34,11 +38,26 @@ struct MenuModelTests {
         let menu = MenuBuilder.menu(from: AppMenu.entries(actions(Recorder())))
         let titles = menu.items.map { $0.isSeparatorItem ? "-" : $0.title }
         #expect(titles == [
-            "Capture Area", "Capture Window", "Capture Fullscreen", "All-In-One", "Capture", "Annotate", "-",
+            "Capture Area", "Capture Window", "Capture Fullscreen", "All-In-One", "Capture", "Annotate",
+            "Hide Overlays", "Restore Recently Closed", "-",
+            "History…", "Hide Desktop Icons", "-",
             "Screen Recording Permission…", "Launch at Login", "Settings…", "-", "Quit ScreenCap"
         ])
         #expect(menu.item(withTitle: "Settings…")?.keyEquivalent == ",")
         #expect(menu.item(withTitle: "Quit ScreenCap")?.keyEquivalent == "q")
+    }
+
+    @Test func historyAndDesktopIconRows() {
+        let recorder = Recorder()
+        let menu = MenuBuilder.menu(from: AppMenu.entries(actions(recorder)))
+        let icons = menu.item(withTitle: "Hide Desktop Icons")
+        #expect(icons?.state == .off)
+        recorder.iconsHidden = true
+        MenuBuilder.refreshStates(in: menu)
+        #expect(icons?.state == .on)
+        fire(menu.item(withTitle: "History…"))
+        fire(icons)
+        #expect(recorder.calls == ["history", "icons"])
     }
 
     @Test func itemsRunTheirActions() {
@@ -57,7 +76,8 @@ struct MenuModelTests {
         let menu = MenuBuilder.menu(from: AppMenu.entries(actions(recorder)))
         let submenu = try #require(menu.item(withTitle: "Capture")?.submenu)
         #expect(submenu.items.map(\.title) == [
-            "Capture Previous Area", "Self-Timer", "Scrolling Capture", "Capture Text"
+            "Capture Previous Area", "Self-Timer", "Scrolling Capture", "Capture Text", "",
+            "Pin from Clipboard", "Unlock All Pins"
         ])
         let timer = try #require(submenu.item(withTitle: "Self-Timer")?.submenu)
         fire(timer.item(withTitle: "Start"))

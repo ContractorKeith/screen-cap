@@ -3,9 +3,7 @@ import ScreenCapKit
 import UniformTypeIdentifiers
 
 extension Notification.Name {
-    /// Opens the editor. userInfo: a `CaptureResult` under "result" or a file URL under "url".
-    /// Posted by Quick Access (issue #24).
-    static let openAnnotateRequested = Notification.Name("ScreenCapOpenAnnotateRequested")
+    // `openAnnotateRequested` is shared; see App/Automation/AutomationNotifications.swift.
     /// Menu: Annotate ▸ Open Image…
     static let openEditorImageRequested = Notification.Name("ScreenCapOpenEditorImageRequested")
     /// Menu: Annotate ▸ Open from Clipboard…

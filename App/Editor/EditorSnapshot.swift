@@ -65,9 +65,9 @@ enum BackgroundMath {
     /// cropped) to `aspect` through the same layout the compositor uses.
     static func canvasSize(imageSize: CGSize, background: Document.Background?, aspect: Double?) -> CGSize {
         guard let background else { return imageSize }
-        let spec = BackgroundSpec(fill: .solid(.white), padding: EffectsInsets(all: background.padding),
-                                  aspectRatio: aspect.map { CGFloat($0) })
-        return BackgroundCompositor.layout(imageSize: imageSize, spec: spec).canvas
+        return BackgroundCompositor.layout(
+            imageSize: imageSize, background: background, aspectRatio: aspect.map { CGFloat($0) }
+        ).canvas
     }
 
     /// Where the base image sits on the canvas. Mirrors the renderer's layout so canvas clicks

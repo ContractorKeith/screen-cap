@@ -6,27 +6,34 @@ import ScreenCaptureKit
 
 /// Captures stills with `SCScreenshotManager`. No persistent streams.
 ///
-/// Our own app's windows (overlays, Quick Access, pins) are always excluded.
+/// Our own app's windows (overlays, Quick Access, pins) are always excluded, except the ones
+/// `includedOwnWindows` returns (the desktop-icon covers, which must show up in captures).
 public actor CaptureService {
     /// Supplies the current display arrangement.
     public typealias GeometryProvider = @Sendable () async -> DisplayGeometry
+    /// Supplies our own window IDs that display captures should keep.
+    public typealias WindowIDProvider = @Sendable () async -> Set<CGWindowID>
 
     private let excludedBundleIdentifier: String?
     private let showsCursor: Bool
     private let geometryProvider: GeometryProvider
+    private let includedOwnWindows: WindowIDProvider
 
     /// - Parameters:
     ///   - excludedBundleIdentifier: App whose windows never appear in captures. Defaults to this app.
     ///   - showsCursor: Draw the mouse cursor into display captures.
     ///   - geometryProvider: Source of display frames and scales. Defaults to `NSScreen`.
+    ///   - includedOwnWindows: Our own windows to keep in display captures despite the exclusion.
     public init(
         excludedBundleIdentifier: String? = Bundle.main.bundleIdentifier ?? ScreenCapKit.bundleIdentifier,
         showsCursor: Bool = false,
-        geometryProvider: @escaping GeometryProvider = { @MainActor in DisplayGeometry.fromCurrentScreens() }
+        geometryProvider: @escaping GeometryProvider = { @MainActor in DisplayGeometry.fromCurrentScreens() },
+        includedOwnWindows: @escaping WindowIDProvider = { [] }
     ) {
         self.excludedBundleIdentifier = excludedBundleIdentifier
         self.showsCursor = showsCursor
         self.geometryProvider = geometryProvider
+        self.includedOwnWindows = includedOwnWindows
     }
 
     /// Captures one whole display at its native pixel size.
@@ -37,7 +44,8 @@ public actor CaptureService {
               let display = content.value.displays.first(where: { $0.displayID == id }) else {
             throw CaptureError.displayNotFound(id)
         }
-        let request = DisplayRequest(display: display, info: info, excluded: excludedApps(in: content.value))
+        let request = DisplayRequest(display: display, info: info, excluded: excludedApps(in: content.value),
+                                     excepted: await exceptedWindows(in: content.value))
         return try await Self.capture(Unchecked(request), showsCursor: showsCursor)
     }
 
@@ -46,9 +54,10 @@ public actor CaptureService {
         let geometry = await geometryProvider()
         let content = try await Self.shareableContent()
         let excluded = excludedApps(in: content.value)
+        let excepted = await exceptedWindows(in: content.value)
         let requests = geometry.displays.compactMap { info -> Unchecked<DisplayRequest>? in
             guard let display = content.value.displays.first(where: { $0.displayID == info.id }) else { return nil }
-            return Unchecked(DisplayRequest(display: display, info: info, excluded: excluded))
+            return Unchecked(DisplayRequest(display: display, info: info, excluded: excluded, excepted: excepted))
         }
         let showsCursor = showsCursor
         return try await withThrowingTaskGroup(of: (Int, CapturedImage).self) { group in
@@ -120,6 +129,12 @@ public actor CaptureService {
         return content.applications.filter { $0.bundleIdentifier == excludedBundleIdentifier }
     }
 
+    private func exceptedWindows(in content: SCShareableContent) async -> [SCWindow] {
+        let ids = await includedOwnWindows()
+        guard !ids.isEmpty else { return [] }
+        return content.windows.filter { ids.contains($0.windowID) }
+    }
+
     private static func shareableContent() async throws -> Unchecked<SCShareableContent> {
         Unchecked(try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true))
     }
@@ -134,7 +149,7 @@ public actor CaptureService {
     private static func capture(_ request: Unchecked<DisplayRequest>, showsCursor: Bool) async throws -> CapturedImage {
         let request = request.value
         let filter = SCContentFilter(
-            display: request.display, excludingApplications: request.excluded, exceptingWindows: []
+            display: request.display, excludingApplications: request.excluded, exceptingWindows: request.excepted
         )
         let config = SCStreamConfiguration()
         let pixelSize = request.info.pixelSize
@@ -182,6 +197,7 @@ private struct DisplayRequest {
     let display: SCDisplay
     let info: DisplayInfo
     let excluded: [SCRunningApplication]
+    let excepted: [SCWindow]
 }
 
 private struct WindowRequest {

@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Spotlight")
 struct SpotlightTests {
-    static let gray = EffectsColor(red: 0.8, green: 0.6, blue: 0.4)
+    static let gray = RGBAColor(red: 0.8, green: 0.6, blue: 0.4)
 
     @Test func dimsOutsideAndKeepsInside() throws {
         let image = try EffectsFixtures.image(width: 100, height: 100, fill: Self.gray)
@@ -12,8 +12,8 @@ struct SpotlightTests {
         let result = try Spotlight.apply(
             image,
             shapes: [
-                .rect(CGRect(x: 10, y: 10, width: 30, height: 30)),
-                .ellipse(CGRect(x: 50, y: 50, width: 40, height: 40))
+                .rect(rect: CGRect(x: 10, y: 10, width: 30, height: 30)),
+                .ellipse(rect: CGRect(x: 50, y: 50, width: 40, height: 40))
             ],
             dimColor: .black, dimOpacity: 0.5
         )
@@ -36,8 +36,8 @@ struct SpotlightTests {
         let result = try Spotlight.apply(
             image,
             shapes: [
-                .rect(CGRect(x: 0, y: 0, width: 40, height: 40)),
-                .rect(CGRect(x: 20, y: 0, width: 40, height: 40))
+                .rect(rect: CGRect(x: 0, y: 0, width: 40, height: 40)),
+                .rect(rect: CGRect(x: 20, y: 0, width: 40, height: 40))
             ]
         )
         #expect(try EffectsFixtures.pixel(result, x: 30, y: 20) == original)
@@ -46,17 +46,18 @@ struct SpotlightTests {
 
 @Suite("BackgroundCompositor")
 struct BackgroundCompositorTests {
-    static let red = EffectsColor(red: 1, green: 0, blue: 0)
+    static let red = RGBAColor(red: 1, green: 0, blue: 0)
 
     @Test func outputIsImagePlusPaddingWithFillInCorner() throws {
         let image = try EffectsFixtures.image(width: 100, height: 60, fill: .white)
-        let spec = BackgroundSpec(
-            fill: .solid(Self.red),
-            padding: EffectsInsets(top: 10, left: 20, bottom: 30, right: 40),
-            cornerRadius: 12,
-            shadow: EffectsShadow(offset: CGSize(width: 0, height: 4), blur: 6, opacity: 0.4)
+        let background = Document.Background(
+            fill: .solid(color: Self.red), cornerRadius: 12,
+            shadow: Document.Shadow(color: RGBAColor(red: 0, green: 0, blue: 0, alpha: 0.4), radius: 6,
+                                    offset: CGSize(width: 0, height: 4))
         )
-        let result = try BackgroundCompositor.render(image, background: spec)
+        let result = try BackgroundCompositor.render(
+            image, background: background, padding: EffectsInsets(top: 10, left: 20, bottom: 30, right: 40)
+        )
         #expect(result.width == 160 && result.height == 100)
         #expect(try EffectsFixtures.pixel(result, x: 0, y: 0) == [255, 0, 0, 255])
         #expect(try EffectsFixtures.pixel(result, x: 159, y: 99) == [255, 0, 0, 255])
@@ -68,30 +69,47 @@ struct BackgroundCompositorTests {
 
     @Test func aspectRatioGrowsCanvasAndAligns() throws {
         let image = try EffectsFixtures.image(width: 100, height: 100, fill: .white)
-        let spec = BackgroundSpec(
-            fill: .solid(Self.red), padding: EffectsInsets(all: 10), alignment: .leading, aspectRatio: 2
-        )
-        let layout = BackgroundCompositor.layout(imageSize: CGSize(width: 100, height: 100), spec: spec)
+        let background = Document.Background(fill: .solid(color: Self.red), padding: 10, alignment: .left)
+        let layout = BackgroundCompositor.layout(imageSize: CGSize(width: 100, height: 100), background: background,
+                                                 aspectRatio: 2)
         #expect(layout.canvas == CGSize(width: 240, height: 120))
         #expect(layout.frame.origin == CGPoint(x: 10, y: 10))
-        let result = try BackgroundCompositor.render(image, background: spec)
+        let result = try BackgroundCompositor.render(image, background: background, aspectRatio: 2)
         #expect(result.width == 240 && result.height == 120)
         #expect(try EffectsFixtures.pixel(result, x: 200, y: 60) == [255, 0, 0, 255])
     }
 
+    /// Document convention: 0 = left to right, 90 = bottom to top, so 270 runs top to bottom.
     @Test func gradientRunsAlongAngle() throws {
         let image = try EffectsFixtures.image(width: 10, height: 10, fill: .white)
         let stops = [
-            EffectsGradientStop(color: .black, location: 0),
-            EffectsGradientStop(color: .white, location: 1)
+            Document.GradientStop(color: .black, location: 0),
+            Document.GradientStop(color: .white, location: 1)
         ]
-        let spec = BackgroundSpec(fill: .linearGradient(stops: stops, angle: 90), padding: EffectsInsets(all: 45))
-        let result = try BackgroundCompositor.render(image, background: spec)
+        let background = Document.Background(fill: .linearGradient(stops: stops, angle: 270), padding: 45)
+        let result = try BackgroundCompositor.render(image, background: background)
         let top = try EffectsFixtures.pixel(result, x: 2, y: 1)
         let bottom = try EffectsFixtures.pixel(result, x: 2, y: 98)
         #expect(top[0] < 20 && bottom[0] > 235)
         // Same row, different columns: equal (within dithering) for a vertical gradient.
         let sameRow = try EffectsFixtures.pixel(result, x: 90, y: 1)
         #expect(abs(sameRow[0] - top[0]) <= 2)
+
+        // 90 runs the other way: black at the bottom.
+        let flipped = Document.Background(fill: .linearGradient(stops: stops, angle: 90), padding: 45)
+        let upward = try BackgroundCompositor.render(image, background: flipped)
+        #expect(try EffectsFixtures.pixel(upward, x: 2, y: 1)[0] > 235)
+        #expect(try EffectsFixtures.pixel(upward, x: 2, y: 98)[0] < 20)
+    }
+
+    @Test func imageFillComesFromLayers() throws {
+        let image = try EffectsFixtures.image(width: 10, height: 10, fill: .white)
+        let wallpaper = try EffectsFixtures.image(width: 4, height: 4, fill: Self.red)
+        let background = Document.Background(fill: .bundled(name: "dunes"), padding: 10, shadow: nil)
+        let result = try BackgroundCompositor.render(image, background: background, layers: ["dunes": wallpaper])
+        #expect(try EffectsFixtures.pixel(result, x: 1, y: 1) == [255, 0, 0, 255])
+        // A missing layer leaves the fill transparent.
+        let missing = try BackgroundCompositor.render(image, background: background)
+        #expect(try EffectsFixtures.pixel(missing, x: 1, y: 1)[3] == 0)
     }
 }

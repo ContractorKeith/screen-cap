@@ -23,8 +23,35 @@ extension CaptureCoordinator {
             } else {
                 try await select(flow, windows: windows)
             }
-        case .area, .window, .allInOne, .scrolling, .text:
+        case .scrolling:
+            if let rect = scrollingRegion {
+                scrollingRegion = nil
+                await scroll(rect, flow)
+            } else {
+                try await select(flow, windows: windows)
+            }
+        case .area, .window, .allInOne, .text:
             try await select(flow, windows: windows)
+        }
+    }
+
+    /// A capture at a known rect (URL scheme regions), skipping interactive selection.
+    func run(_ kind: CaptureKind, rect: CGRect, action: AfterCaptureAction?) async throws {
+        let geometry = DisplayGeometry.fromCurrentScreens()
+        let windows = (try? await service.shareableWindows()) ?? []
+        let flow = Flow(kind: kind, geometry: geometry, context: frontContext(windows: windows), action: action)
+        switch kind {
+        case .allInOne:
+            try await select(flow, windows: windows, preselected: rect)
+        case .selfTimer:
+            try await timedArea(rect, flow)
+        case .scrolling:
+            post(.scrollingCaptureRequested, rect: rect)
+        case .text:
+            post(.captureTextRequested, rect: rect)
+        case .area, .previousArea, .window, .fullscreen:
+            previousArea.remember(rect)
+            await deliver(try await service.captureArea(pointRect: rect), flow)
         }
     }
 
@@ -57,7 +84,7 @@ extension CaptureCoordinator {
 
     // MARK: - Selection overlay
 
-    private func select(_ flow: Flow, windows: [ShareableWindow]) async throws {
+    private func select(_ flow: Flow, windows: [ShareableWindow], preselected: CGRect? = nil) async throws {
         let stills = try await service.captureAllDisplays()
         let options = SelectionOptions(
             showsStill: settings.freezeScreen,
@@ -65,7 +92,7 @@ extension CaptureCoordinator {
             showsMagnifier: settings.showMagnifier,
             allInOne: flow.kind == .allInOne,
             startMode: flow.kind == .window ? .window : .area,
-            previousRect: previousArea.rect(validIn: flow.geometry)
+            previousRect: preselected ?? previousArea.rect(validIn: flow.geometry)
         )
         let overlay = SelectionOverlay(stills: stills, geometry: flow.geometry, windows: windows, options: options)
         switch await overlay.run() {
@@ -94,7 +121,7 @@ extension CaptureCoordinator {
     private func captureSelectedArea(_ rect: CGRect, stills: [CapturedImage], _ flow: Flow) async throws {
         switch flow.kind {
         case .scrolling:
-            post(.scrollingCaptureRequested, rect: rect)
+            await scroll(rect, flow)
         case .text:
             post(.captureTextRequested, rect: rect)
         case .selfTimer:
@@ -118,7 +145,7 @@ extension CaptureCoordinator {
                 await deliver(try await service.captureDisplay(display.id), flow, as: .fullscreen)
             }
         case .scrolling:
-            post(.scrollingCaptureRequested, rect: rect)
+            await scroll(rect, flow)
         case .text:
             post(.captureTextRequested, rect: rect)
         case .timer:
@@ -163,6 +190,13 @@ extension CaptureCoordinator {
             throw CaptureError.areaOffScreen(CGRect(origin: mouse, size: .zero))
         }
         await deliver(try await service.captureDisplay(display.id), flow)
+    }
+
+    /// Scrolling capture runs inside this capture task, so `--quit` waits for it.
+    private func scroll(_ rect: CGRect, _ flow: Flow) async {
+        guard let scrollingHandler else { return post(.scrollingCaptureRequested, rect: rect) }
+        try? await Task.sleep(for: Self.overlayHideDelay)
+        await scrollingHandler(rect, flow.context, flow.action)
     }
 
     /// Hands a region to a feature another worker owns (scrolling, OCR).
