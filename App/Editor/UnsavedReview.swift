@@ -45,6 +45,74 @@ struct UnsavedReview<ID: Hashable> {
     }
 }
 
+/// Turns the prompt's answer into an outcome: Save runs `save` and reports `.saved` only once
+/// it finishes (`.cancelled` if it doesn't); the other answers pass straight through.
+@MainActor
+enum UnsavedChangesFlow {
+    static func resolve(_ answer: UnsavedOutcome,
+                        save: (@escaping @MainActor (Bool) -> Void) -> Void,
+                        done: @escaping @MainActor (UnsavedOutcome) -> Void) {
+        guard answer == .saved else { done(answer); return }
+        save { saved in done(saved ? .saved : .cancelled) }
+    }
+}
+
+/// A window the quit review asks about.
+@MainActor
+protocol UnsavedQuitReviewable: AnyObject {
+    var hasUnsavedChanges: Bool { get }
+    /// Asks Save / Don't Save / Cancel and calls `done` exactly once with the result.
+    func reviewBeforeQuit(_ done: @escaping @MainActor (UnsavedOutcome) -> Void)
+}
+
+/// Runs one quit review at a time over the open windows and replies to the terminate request
+/// exactly once. After a Cancel the next quit starts a fresh review.
+@MainActor
+final class QuitReviewer {
+    private var review: UnsavedReview<ObjectIdentifier>?
+    private let windows: @MainActor () -> [any UnsavedQuitReviewable]
+
+    /// `windows`: the open windows, read again at each step since one may close meanwhile.
+    init(windows: @escaping @MainActor () -> [any UnsavedQuitReviewable]) {
+        self.windows = windows
+    }
+
+    var isReviewing: Bool { review != nil }
+
+    /// `applicationShouldTerminate`: quits now when nothing is unsaved; otherwise asks about each
+    /// unsaved window in turn and calls `reply` with the verdict (Cancel or a failed save stops).
+    func start(reply: @escaping @MainActor (Bool) -> Void) -> NSApplication.TerminateReply {
+        guard review == nil else { return .terminateCancel } // a review is already on screen
+        let fresh = UnsavedReview(dirty: windows().filter(\.hasUnsavedChanges).map(ObjectIdentifier.init))
+        guard case .ask = fresh.firstStep else { return .terminateNow }
+        review = fresh
+        advance(fresh.firstStep, reply: reply)
+        return .terminateLater
+    }
+
+    private func advance(_ step: UnsavedReview<ObjectIdentifier>.Step, reply: @escaping @MainActor (Bool) -> Void) {
+        switch step {
+        case let .ask(id):
+            guard let window = windows().first(where: { ObjectIdentifier($0) == id }) else {
+                // Closed meanwhile: nothing left to lose there.
+                advance(record(.discarded), reply: reply)
+                return
+            }
+            window.reviewBeforeQuit { [weak self] outcome in
+                guard let self else { return }
+                self.advance(self.record(outcome), reply: reply)
+            }
+        case .terminate, .cancel:
+            review = nil
+            reply(step == .terminate)
+        }
+    }
+
+    private func record(_ outcome: UnsavedOutcome) -> UnsavedReview<ObjectIdentifier>.Step {
+        review?.record(outcome) ?? .cancel
+    }
+}
+
 /// The "Save changes?" sheet shared by closing a window and quitting. Return saves, ⌘D doesn't
 /// save, Esc cancels, and ⌘S saves too, as it does in the editor.
 @MainActor
@@ -79,7 +147,7 @@ enum UnsavedChangesPrompt {
     }
 }
 
-extension EditorWindowController {
+extension EditorWindowController: UnsavedQuitReviewable {
     /// True when quitting should ask about this window.
     var hasUnsavedChanges: Bool {
         canvas.commitTextEditing()
@@ -98,9 +166,9 @@ extension EditorWindowController {
         if window.isMiniaturized { window.deminiaturize(nil) }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        UnsavedChangesPrompt.show(for: window, quitting: true) { [weak self] outcome in
-            guard let self, outcome == .saved else { done(outcome); return }
-            self.saveDocument { saved in done(saved ? .saved : .cancelled) }
+        UnsavedChangesPrompt.show(for: window, quitting: true) { [weak self] answer in
+            guard let self else { done(.cancelled); return }
+            UnsavedChangesFlow.resolve(answer, save: { self.performSave(completion: $0) }, done: done)
         }
     }
 }

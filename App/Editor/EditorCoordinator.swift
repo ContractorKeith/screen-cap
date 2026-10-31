@@ -73,40 +73,11 @@ final class EditorCoordinator: CaptureSink {
 
     // MARK: - Quit
 
-    private var quitReview: UnsavedReview<ObjectIdentifier>?
+    private lazy var quitReviewer = QuitReviewer { [unowned self] in self.windows }
 
-    /// `applicationShouldTerminate`: quits now when nothing is unsaved; otherwise asks about each
-    /// unsaved window in turn and calls `reply` with the verdict (Cancel or a failed save stops).
+    /// `applicationShouldTerminate`: see `QuitReviewer.start(reply:)`.
     func reviewUnsavedBeforeQuit(reply: @escaping @MainActor (Bool) -> Void) -> NSApplication.TerminateReply {
-        guard quitReview == nil else { return .terminateCancel } // a review is already on screen
-        let review = UnsavedReview(dirty: windows.filter(\.hasUnsavedChanges).map(ObjectIdentifier.init))
-        guard case .ask = review.firstStep else { return .terminateNow }
-        quitReview = review
-        advanceQuitReview(review.firstStep, reply: reply)
-        return .terminateLater
-    }
-
-    private func advanceQuitReview(_ step: UnsavedReview<ObjectIdentifier>.Step,
-                                   reply: @escaping @MainActor (Bool) -> Void) {
-        switch step {
-        case let .ask(id):
-            guard let controller = windows.first(where: { ObjectIdentifier($0) == id }) else {
-                // Closed meanwhile: nothing left to lose there.
-                advanceQuitReview(recordQuitOutcome(.discarded), reply: reply)
-                return
-            }
-            controller.reviewBeforeQuit { [weak self] outcome in
-                guard let self else { return }
-                self.advanceQuitReview(self.recordQuitOutcome(outcome), reply: reply)
-            }
-        case .terminate, .cancel:
-            quitReview = nil
-            reply(step == .terminate)
-        }
-    }
-
-    private func recordQuitOutcome(_ outcome: UnsavedOutcome) -> UnsavedReview<ObjectIdentifier>.Step {
-        quitReview?.record(outcome) ?? .cancel
+        quitReviewer.start(reply: reply)
     }
 
     private func show(_ model: EditorDocumentModel) {
