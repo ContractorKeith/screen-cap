@@ -6,7 +6,11 @@ and saving only; screen recording is deliberately later. "Done" for v1 is every 
 v1 in the feature matrix in `docs/PLAN.md`.
 
 ## Status
-M1 in progress: app capture flow (issue #23) — overlays, window picker, shortcuts, save/copy. Last touched 2026-10-31.
+First working build (2026-10-31): M0–M7 merged, 337 tests green. Capture (area/window/fullscreen/
+previous/timer/all-in-one/scrolling), Quick Access, Annotate editor, OCR/QR, pins, history, URL
+scheme, settings all run from `make run`. Next: M8 ship (issue #29), then real-world QA passes.
+Grant Screen Recording to `build/ScreenCap.app` once in System Settings; ad-hoc signatures change
+per rebuild, so re-grant after `make clean`.
 
 ## Pointers
 - `docs/PLAN.md` — the build plan: feature matrix, architecture, milestones, acceptance.
