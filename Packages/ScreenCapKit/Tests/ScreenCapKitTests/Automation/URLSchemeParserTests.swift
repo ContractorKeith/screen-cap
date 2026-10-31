@@ -14,7 +14,8 @@ struct StubFileChecker: FileChecker {
 let stubFiles = StubFileChecker(files: [
     "/tmp/shot.png": .png,
     "/tmp/My Shots/shot 1.jpg": .jpeg,
-    "/tmp/notes.txt": .plainText
+    "/tmp/notes.txt": .plainText,
+    "/Users/me/a&b=c+d#e%f.png": .png
 ])
 let schemeStubParser = URLSchemeParser(fileChecker: stubFiles)
 let stubPNG = URL(fileURLWithPath: "/tmp/shot.png")
@@ -101,6 +102,13 @@ struct URLSchemeCommandTests {
         #expect(try parseScheme("screencap://open-settings") == .openSettings(tab: nil))
         #expect(try parseScheme("screencap://open-settings?tab=quickaccess") == .openSettings(tab: .quickAccess))
         #expect(try parseScheme("screencap://open-settings?tab=shortcuts") == .openSettings(tab: .shortcuts))
+        #expect(try parseScheme("screencap://open-settings?tab=scrolling") == .openSettings(tab: .scrolling))
+        #expect(try parseScheme("screencap://open-settings?tab=text") == .openSettings(tab: .text))
+    }
+
+    /// Settings has no History tab (#52): the History window is `open-history`.
+    @Test func openSettingsRejectsHistory() {
+        expectParseError("screencap://open-settings?tab=history", .invalidParameter(name: "tab", value: "history"))
     }
 
     @Test func staticParseUsesRealFilesystem() throws {

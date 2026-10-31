@@ -62,9 +62,9 @@ struct AdvancedSettingsPane: View {
             autoUpdate = updater.automaticallyChecksForUpdates
         }
         .confirmationDialog("Reset all settings to their defaults?", isPresented: $confirmingReset) {
-            Button("Reset", role: .destructive) { settings.resetToDefaults() }
+            Button("Reset", role: .destructive) { SettingsReset.resetAll(settings: settings) }
         } message: {
-            Text("Shortcuts, saved captures and Launch at Login are not changed.")
+            Text("Shortcuts, saved captures, update checks and Launch at Login are not changed.")
         }
     }
 

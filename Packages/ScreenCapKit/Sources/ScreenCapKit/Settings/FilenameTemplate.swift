@@ -24,7 +24,7 @@ public struct FilenameTemplate: Sendable {
         }
     }
 
-    /// Max filename length in characters, excluding the extension.
+    /// Max filename length in UTF-8 bytes, excluding the extension. APFS allows 255 bytes per name.
     public static let maxLength = 200
     /// Used when the template renders to nothing.
     public static let fallbackName = "ScreenCap"
@@ -127,12 +127,26 @@ public struct FilenameTemplate: Sendable {
         return cleaned
     }
 
-    /// Truncates the stem so stem + suffix fits `maxLength`, then adds the extension.
+    /// Truncates the stem so stem + suffix fits `maxLength` UTF-8 bytes, then adds the extension.
     private func filename(stem: String, suffix: String) -> String {
         let base = stem.isEmpty ? Self.fallbackName : stem
-        let room = max(Self.maxLength - suffix.count, 1)
-        let truncated = String(base.prefix(room)).trimmingCharacters(in: .whitespaces)
+        let room = max(Self.maxLength - suffix.utf8.count, 1)
+        let truncated = Self.prefix(base, maxBytes: room).trimmingCharacters(in: .whitespaces)
         return "\(truncated)\(suffix).\(format.fileExtension)"
+    }
+
+    /// The longest prefix of whole characters (grapheme clusters) within `maxBytes` UTF-8 bytes.
+    static func prefix(_ string: String, maxBytes: Int) -> String {
+        guard string.utf8.count > maxBytes else { return string }
+        var bytes = 0
+        var end = string.startIndex
+        for index in string.indices {
+            let next = string.index(after: index)
+            bytes += string[index..<next].utf8.count
+            if bytes > maxBytes { break }
+            end = next
+        }
+        return String(string[..<end])
     }
 
     private func stamp(_ date: Date, _ pattern: String) -> String {
