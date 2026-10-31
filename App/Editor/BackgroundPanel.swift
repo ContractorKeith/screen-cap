@@ -86,6 +86,8 @@ struct BackgroundPanel: View {
                 }
                 .buttonStyle(.plain)
                 .help(name)
+                .accessibilityLabel(A11y.background(name))
+                .accessibilityValue(name == selected ? A11y.selected : "")
             }
         }
     }
@@ -143,6 +145,9 @@ struct BackgroundPanel: View {
                                     .frame(width: 18, height: 14)
                             }
                             .buttonStyle(.plain)
+                            .help(A11y.alignment(alignment))
+                            .accessibilityLabel(A11y.alignment(alignment))
+                            .accessibilityValue(alignment == current ? A11y.selected : "")
                         }
                     }
                 }
@@ -216,16 +221,20 @@ struct BackgroundPanel: View {
     }
 }
 
-/// Rotate, flip and resize dialog.
+/// Rotate, flip and resize dialog. Sizes are checked as they're typed against `ResizeLimits`.
 struct TransformSheet: View {
     @Bindable var model: EditorDocumentModel
     let dismiss: () -> Void
-    @State private var width: Double = 0
-    @State private var height: Double = 0
+    @State private var widthText = ""
+    @State private var heightText = ""
     @State private var keepAspect = true
+
+    static let limitHint = "Up to \(ResizeLimits.maxSide) px per side, \(ResizeLimits.maxPixels / 1_000_000) MP total."
 
     var body: some View {
         let size = model.snapshot.imageSize
+        let verdict = ResizeLimits.validate(width: ResizeLimits.parse(widthText),
+                                            height: ResizeLimits.parse(heightText))
         VStack(alignment: .leading, spacing: 16) {
             Text("Rotate, Flip, Resize").font(.headline)
             HStack {
@@ -242,19 +251,24 @@ struct TransformSheet: View {
             }
             Divider()
             Form {
-                TextField("Width (px)", value: Binding { width } set: { setWidth($0, size: size) }, format: .number)
-                TextField("Height (px)", value: Binding { height } set: { setHeight($0, size: size) }, format: .number)
+                TextField("Width (px)", text: Binding { widthText } set: { setWidth($0, size: size) })
+                TextField("Height (px)", text: Binding { heightText } set: { setHeight($0, size: size) })
                 Toggle("Keep aspect ratio", isOn: $keepAspect)
             }
+            Text(verdict.message ?? Self.limitHint)
+                .font(.caption)
+                .foregroundStyle(verdict.message == nil ? Color.secondary : Color.red)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
                 Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Resize") {
-                    model.resizeImage(to: CGSize(width: width, height: height))
+                    guard let target = verdict.size else { return }
+                    model.resizeImage(to: target)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(width < 1 || height < 1)
+                .disabled(verdict.size == nil)
             }
         }
         .padding(20)
@@ -263,17 +277,19 @@ struct TransformSheet: View {
     }
 
     private func sync() {
-        width = model.snapshot.imageSize.width
-        height = model.snapshot.imageSize.height
+        widthText = ResizeLimits.text(model.snapshot.imageSize.width)
+        heightText = ResizeLimits.text(model.snapshot.imageSize.height)
     }
 
-    private func setWidth(_ value: Double, size: CGSize) {
-        width = value
-        if keepAspect, size.width > 0 { height = (value * size.height / size.width).rounded() }
+    private func setWidth(_ text: String, size: CGSize) {
+        widthText = text
+        guard keepAspect, size.width > 0, let value = ResizeLimits.parse(text) else { return }
+        heightText = ResizeLimits.text(value * size.height / size.width)
     }
 
-    private func setHeight(_ value: Double, size: CGSize) {
-        height = value
-        if keepAspect, size.height > 0 { width = (value * size.width / size.height).rounded() }
+    private func setHeight(_ text: String, size: CGSize) {
+        heightText = text
+        guard keepAspect, size.height > 0, let value = ResizeLimits.parse(text) else { return }
+        widthText = ResizeLimits.text(value * size.width / size.height)
     }
 }

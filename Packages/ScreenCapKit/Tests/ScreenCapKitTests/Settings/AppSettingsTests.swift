@@ -126,8 +126,9 @@ struct AppSettingsTests {
     }
 
     @Test func userDefaultsStoreRoundTrips() throws {
-        let suite = "com.contractorkeith.screencap.tests.\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let temporary = TemporaryDefaults()
+        defer { temporary.remove() }
+        let suite = temporary.name
         let written = AppSettings(store: UserDefaultsSettingsStore(suiteName: suite))
         written.imageFormat = .tiff
         written.jpegQuality = 0.25

@@ -6,14 +6,6 @@ import Testing
 @Suite("Settings navigation and reset")
 @MainActor
 struct SettingsResetTests {
-    /// A throwaway defaults domain, removed when the test ends.
-    final class Defaults {
-        let name = "screencap.tests.\(UUID().uuidString)"
-        let store: UserDefaults
-        init() { store = UserDefaults(suiteName: name)! } // swiftlint:disable:this force_unwrapping
-        deinit { UserDefaults().removePersistentDomain(forName: name) }
-    }
-
     // MARK: - Tabs (#52)
 
     @Test func everySettingsTabHasAURLSpelling() {
@@ -24,7 +16,8 @@ struct SettingsResetTests {
     }
 
     @Test func invalidPersistedTabFallsBackToGeneral() {
-        let defaults = Defaults()
+        let defaults = TemporaryDefaults()
+        defer { defaults.remove() }
         defaults.store.set("history", forKey: SettingsNavigation.defaultsKey)
         #expect(SettingsNavigation(defaults: defaults.store).tab == .general)
         defaults.store.removeObject(forKey: SettingsNavigation.defaultsKey)
@@ -32,7 +25,8 @@ struct SettingsResetTests {
     }
 
     @Test func selectedTabPersists() {
-        let defaults = Defaults()
+        let defaults = TemporaryDefaults()
+        defer { defaults.remove() }
         SettingsNavigation(defaults: defaults.store).tab = .scrolling
         #expect(defaults.store.string(forKey: SettingsNavigation.defaultsKey) == "scrolling")
         #expect(SettingsNavigation(defaults: defaults.store).tab == .scrolling)
@@ -41,7 +35,8 @@ struct SettingsResetTests {
     // MARK: - Reset All Settings (#57)
 
     @Test func resetReturnsEveryPaneToDefaults() {
-        let defaults = Defaults()
+        let defaults = TemporaryDefaults()
+        defer { defaults.remove() }
         let settings = AppSettings(store: UserDefaultsSettingsStore(suiteName: defaults.name))
         let scrolling = ScrollingSettings(defaults: defaults.store)
         let editor = EditorPreferences(store: UserDefaultsSettingsStore(suiteName: defaults.name))

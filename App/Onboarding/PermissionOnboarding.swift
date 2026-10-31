@@ -107,9 +107,11 @@ struct PermissionOnboardingView: View {
                 ForEach(WelcomePolicy.mainShortcuts, id: \.name.rawValue) { entry in
                     GridRow {
                         Text(entry.title)
-                        Text(KeyboardShortcuts.getShortcut(for: entry.name)?.description ?? "Not set")
+                        let shortcut = KeyboardShortcuts.getShortcut(for: entry.name)?.description ?? "Not set"
+                        Text(shortcut)
                             .font(.body.monospaced())
                             .foregroundStyle(.secondary)
+                            .accessibilityLabel(A11y.spokenShortcut(shortcut))
                     }
                 }
             }

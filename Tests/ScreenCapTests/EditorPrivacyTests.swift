@@ -47,7 +47,9 @@ struct EditorPrivacyTests {
         await model.detectedTextLines()
         #expect(model.isRedaction(try #require(model.document.annotation(withID: bar))))
         #expect(model.unmarkedOpaqueCovers.map(\.id) == [swatch])
-        #expect(model.needsRedactionBakeConfirmation(defaults: UserDefaults(suiteName: UUID().uuidString)!))
+        let defaults = TemporaryDefaults()
+        defer { defaults.remove() }
+        #expect(model.needsRedactionBakeConfirmation(defaults: defaults.store))
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("privacy-\(UUID().uuidString).\(ProjectFile.fileExtension)")

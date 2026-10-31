@@ -29,6 +29,8 @@ struct AnnotateSettingsPane: View {
                 LabeledContent("Stroke width") {
                     HStack {
                         Slider(value: $preferences.strokeWidth, in: 1...40)
+                            .accessibilityLabel("Stroke width")
+                            .accessibilityValue("\(Int(preferences.strokeWidth)) px")
                         Text("\(Int(preferences.strokeWidth)) px").monospacedDigit().frame(width: 44)
                     }
                 }

@@ -27,6 +27,7 @@ struct GeneralSettingsPane: View {
                     Picker(Self.title(for: shortcut), selection: actionBinding(for: shortcut)) {
                         ForEach(AfterCaptureAction.allCases, id: \.self) { Text(Self.title(for: $0)).tag($0) }
                     }
+                    .accessibilityLabel(A11y.afterCaptureLabel(Self.title(for: shortcut)))
                 }
             }
         }

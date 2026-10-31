@@ -76,6 +76,9 @@ struct EditorToolbar: View {
                                     in: RoundedRectangle(cornerRadius: 5))
                 }
                 .help("\(tool.title) (\(tool.key.map { String($0).uppercased() } ?? ""))")
+                .accessibilityLabel(A11y.toolLabel(tool))
+                .accessibilityHint(A11y.toolHint(tool))
+                .accessibilityValue(model.tool == tool ? A11y.selected : "")
             }
         }
     }
@@ -87,11 +90,13 @@ struct EditorToolbar: View {
                 ForEach(ArrowChoice.allCases) { Text($0.title).tag($0) }
             }
             .frame(width: 150)
+            .accessibilityLabel(A11y.arrowStyle)
         } else if model.tool == .text || model.selectionContains({ if case .text = $0 { true } else { false } }) {
             Picker("Text", selection: textBinding) {
                 ForEach(TextPreset.allCases, id: \.self) { Text($0.title).tag($0) }
             }
             .frame(width: 190)
+            .accessibilityLabel(A11y.textStyle)
         }
     }
 
@@ -192,10 +197,13 @@ struct CropBar: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 300)
+            .accessibilityLabel(A11y.cropAspect)
             if model.cropAspect == .custom {
                 TextField("W", value: aspectBinding(\.width), format: .number).frame(width: 44)
+                    .accessibilityLabel("Aspect width")
                 Text(":")
                 TextField("H", value: aspectBinding(\.height), format: .number).frame(width: 44)
+                    .accessibilityLabel("Aspect height")
             }
             if let rect = model.cropRect {
                 Text("\(Int(rect.width.rounded())) × \(Int(rect.height.rounded()))")
