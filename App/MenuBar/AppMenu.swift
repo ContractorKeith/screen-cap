@@ -36,6 +36,7 @@ enum AppMenu {
                 .item(MenuAction("Pin from Clipboard", perform: actions.pinFromClipboard)),
                 .item(MenuAction("Unlock All Pins", perform: actions.unlockAllPins))
             ]),
+            .submenu("Annotate", EditorMenu.entries),
             .item(MenuAction("Hide Overlays", shortcut: .toggleOverlays, isOn: { QuickAccessVisibility.isHidden },
                              perform: post(.toggleOverlaysRequested))),
             .item(MenuAction("Restore Recently Closed", perform: post(.restoreRecentlyClosedRequested))),

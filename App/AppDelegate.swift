@@ -121,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Each UI feature creates its controller here and assigns itself on `sinkRouter`
     /// (overlay, annotate, pin). Keep one line per feature so parallel PRs merge cleanly.
     private func installFeatures() {
+        sinkRouter.annotate = EditorCoordinator.install(settings: settings)
         settingsWindow.history = history // Screenshots, Wallpaper, Advanced, About panes (#28)
         _ = historyWindow // History window, opens on .openHistoryRequested (#28)
         coordinator.desktopIcons = desktopIcons // Hide desktop icons while capturing (#28)

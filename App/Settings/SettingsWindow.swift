@@ -42,6 +42,9 @@ struct SettingsView: View {
             TextRecognitionSettingsPane(settings: settings)
                 .tabItem { Label("Text Recognition", systemImage: "text.viewfinder") }
                 .tag("text")
+            AnnotateSettingsPane(settings: settings)
+                .tabItem { Label("Annotate", systemImage: "pencil.and.outline") }
+                .tag(AutomationCommand.SettingsTab.annotate.rawValue)
             WallpaperSettingsPane(settings: settings)
                 .tabItem { Label("Wallpaper", systemImage: "photo.on.rectangle") }
                 .tag(AutomationCommand.SettingsTab.wallpaper.rawValue)
