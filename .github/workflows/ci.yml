@@ -22,7 +22,7 @@ jobs:
         run: swift build
       - name: Test
         timeout-minutes: 15
-        run: swift test
+        run: swift test --no-parallel
       - name: SwiftLint
         run: |
           command -v swiftlint || brew install swiftlint
