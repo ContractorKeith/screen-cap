@@ -15,8 +15,18 @@ import CoreGraphics
 ///   ambiguous replace it, waiting for one that lines up.
 /// When a later frame lines up with the last placed one, the held frame was a transient
 /// (animation, lazy load, an in-between scroll position) and is dropped. Otherwise the held frame
-/// is appended whole after a dashed seam marker, reported as `.gapDetected`, and stitching
+/// is appended after a dashed seam marker, reported as `.gapDetected`, and stitching
 /// continues from it. `finish()` keeps a frame still held when the capture stops the same way.
+///
+/// With auto-scroll (#112) the scroll distance is known, so it is the ground truth:
+/// - Lines are compared with noise tolerance: live captures carry dither fixed to the screen, so
+///   moved content never matches byte for byte.
+/// - The step is measured: frames that line up at one offset only give the pixels the page
+///   moves per posted pixel (Terminal moves about 1.5×). On repeating rows, the offset the
+///   measured step predicts decides between equally good matches; Vision and anchors don't.
+/// - A held frame kept after a seam starts after the last stitched row: it goes where the measured
+///   step puts it if it matches the last placed frame there, else where it overlaps that frame
+///   most. Rows may be missing at a seam, but none are appended twice.
 public actor Stitcher {
     /// What happened to one appended frame.
     public enum AppendOutcome: Equatable, Sendable {
@@ -43,15 +53,26 @@ public actor Stitcher {
     /// Cap on the stitched length along `axis`, in pixels, footer included.
     public let maxLength: Int
     private let aligner: FrameAligner
-    /// Auto-scroll step in pixels, if auto-scrolling. Breaks ties on repetitive content.
+    /// Pixels auto-scroll posted since the last placed frame, if auto-scrolling.
     public private(set) var expectedStep: Int?
+    /// Pixels one auto-scroll step posts; `expectedStep` is a whole number of them.
+    public private(set) var stepUnit: Int?
+    /// The step measured on this page.
+    private var gauge = StepGauge()
+    /// Auto-scroll was on for some frame: align with noise tolerance.
+    private var autoScrolled = false
 
     private struct Accepted {
         let image: CGImage
         let frame: PixelFrame
         let hashes: [LineHash]
+        let profiles: LineProfiles
         /// Content coordinate of the frame's line 0 (the first frame is at 0).
         let position: Int
+
+        func moved(to position: Int) -> Accepted {
+            Accepted(image: image, frame: frame, hashes: hashes, profiles: profiles, position: position)
+        }
     }
 
     private var first: Accepted?
@@ -59,7 +80,13 @@ public actor Stitcher {
     /// Why a frame is held back.
     private enum Hold { case unrelated, ambiguous }
     /// A frame that couldn't be placed against `last`, waiting to see whether the content jumped.
-    private var pending: (frame: Accepted, reason: Hold)?
+    private struct Held {
+        let frame: Accepted
+        let reason: Hold
+        /// Pixels posted between `last` and it.
+        let posted: Int?
+    }
+    private var pending: Held?
     private var edges = FixedEdges.none
     /// Edges are known once a pair aligned; until then a gap guesses them (`solidEdges`).
     private var edgesKnown = false
@@ -79,11 +106,19 @@ public actor Stitcher {
     /// The fixed edges detected so far.
     public var fixedEdges: FixedEdges { edges }
 
-    /// Sets the pixels auto-scroll moved the content since the previous frame (nil while scrolling
-    /// manually). Only breaks ties on repetitive content, and only when it matches one offset.
-    public func setExpectedStep(_ step: Int?) {
+    /// Sets the pixels auto-scroll posted since the last placed frame (nil while scrolling manually)
+    /// and, optionally, the pixels of one step. Once a step is measured on this page, ties on
+    /// repetitive content go to the offset it predicts; before that, to the posted distance if it
+    /// matches exactly one offset.
+    public func setExpectedStep(_ step: Int?, unit: Int? = nil) {
         expectedStep = step
+        stepUnit = unit
+        if step != nil { autoScrolled = true }
     }
+
+    /// Content pixels moved per posted pixel, measured on frames that lined up unambiguously.
+    /// Nil until one did.
+    public var measuredScale: Double? { gauge.scale }
 
     /// Lines in a gap's seam marker.
     var seamThickness: Int { max(2, Int((2 * scale).rounded())) }
@@ -93,7 +128,8 @@ public actor Stitcher {
     public func append(frame image: CGImage) -> AppendOutcome {
         guard let first, let last else {
             guard let frame = PixelFrame(image: image) else { return .unrelated }
-            let seed = Accepted(image: image, frame: frame, hashes: frame.lineHashes(along: axis), position: 0)
+            let seed = Accepted(image: image, frame: frame, hashes: frame.lineHashes(along: axis),
+                                profiles: frame.lineProfiles(along: axis), position: 0)
             self.first = seed
             self.last = seed
             return .started
@@ -103,40 +139,54 @@ public actor Stitcher {
               let frame = PixelFrame(image: image, colorSpace: first.frame.context.colorSpace) else {
             return .unrelated
         }
-        let hashes = frame.lineHashes(along: axis)
-        let next = Accepted(image: image, frame: frame, hashes: hashes, position: 0)
+        let next = Accepted(image: image, frame: frame, hashes: frame.lineHashes(along: axis),
+                            profiles: frame.lineProfiles(along: axis), position: 0)
+        let posted = expectedStep
 
-        let alignment = align(next, to: last)
+        let (alignment, evidence) = align(next, to: last, posted: posted)
         switch alignment {
         case .noMovement:
             pending = nil
             return .noMovement
         case .offset(let offset):
             pending = nil
+            if evidence == .unique || evidence == .anchors {
+                gauge.measure(offset: offset, posted: posted, unit: stepUnit)
+            }
             return appendStrip(of: next, offset: offset, after: last)
         case .unrelated, .ambiguous:
             let reason: Hold = alignment == .ambiguous ? .ambiguous : .unrelated
             guard let held = pending else {
-                pending = (next, reason)
+                pending = Held(frame: next, reason: reason, posted: posted)
                 return reason == .ambiguous ? .ambiguous : .unrelated
             }
             // Still ambiguous against the held frame too: it may overlap either, so keep waiting.
-            if held.reason == .ambiguous, [.ambiguous, .noMovement].contains(align(next, to: held.frame)) {
-                pending = (next, .ambiguous)
+            let sinceHeld = Self.distance(from: held.posted, to: posted)
+            if held.reason == .ambiguous,
+               [.ambiguous, .noMovement].contains(align(next, to: held.frame, posted: sinceHeld).alignment) {
+                pending = Held(frame: next, reason: .ambiguous, posted: posted)
                 return .ambiguous
             }
             pending = nil
-            return appendJump(held: held.frame, then: next)
+            return appendJump(held: held.frame, posted: held.posted, then: next, posted: posted)
         }
+    }
+
+    /// Pixels posted between two frames, given the pixels posted up to each since the last placed one.
+    private static func distance(from earlier: Int?, to later: Int?) -> Int? {
+        guard let earlier, let later, later > earlier else { return nil }
+        return later - earlier
     }
 
     /// Two frames in a row past `last`: the content jumped. Keeps the held frame after a seam,
     /// then appends what `next` adds beyond it.
-    private func appendJump(held gap: Accepted, then next: Accepted) -> AppendOutcome {
-        let anchor = appendGap(gap)
+    private func appendJump(held gap: Accepted, posted heldPosted: Int?, then next: Accepted,
+                            posted: Int?) -> AppendOutcome {
+        let anchor = appendGap(gap, posted: heldPosted)
         var lines = anchor.lines
         if isFull { return .maxLengthReached }
-        switch align(next, to: anchor.accepted) {
+        let sinceHeld = Self.distance(from: heldPosted, to: posted)
+        switch align(next, to: anchor.accepted, posted: sinceHeld).alignment {
         case .offset(let offset):
             let outcome = appendStrip(of: next, offset: offset, after: anchor.accepted)
             guard case .appended(let added) = outcome else { return outcome }
@@ -144,15 +194,16 @@ public actor Stitcher {
         case .noMovement:
             break
         case .unrelated:
-            pending = (next, .unrelated)
+            pending = Held(frame: next, reason: .unrelated, posted: posted)
         case .ambiguous:
-            pending = (next, .ambiguous)
+            pending = Held(frame: next, reason: .ambiguous, posted: posted)
         }
         return .gapDetected(lines: lines)
     }
 
-    /// Aligns the moving band (fixed edges excluded) of `next` against `previous`.
-    private func align(_ next: Accepted, to previous: Accepted) -> FrameAligner.Alignment {
+    /// The lines `align` compares: the moving band (fixed edges excluded), hashed exactly, or with
+    /// noise tolerance once auto-scroll is on.
+    private func comparable(_ next: Accepted, _ previous: Accepted) -> (previous: [LineHash], next: [LineHash]) {
         // Before any edges are known, use the edges this pair shares, capped so repetitive
         // content that happens to line up can't hide the whole frame.
         let length = next.hashes.count
@@ -160,20 +211,30 @@ public actor Stitcher {
         band.leading = min(band.leading, length / 3)
         band.trailing = min(band.trailing, length / 3)
         let range = band.leading..<(length - band.trailing)
-        let usesVision = aligner.usesVision
+        guard autoScrolled else { return (Array(previous.hashes[range]), Array(next.hashes[range])) }
+        let (old, new) = LineProfiles.classify(previous.profiles, next.profiles)
+        return (Array(old[range]), Array(new[range]))
+    }
+
+    /// Aligns `next` against `previous`, `posted` auto-scroll pixels further on (nil if unknown).
+    private func align(_ next: Accepted, to previous: Accepted,
+                       posted: Int?) -> (alignment: FrameAligner.Alignment, evidence: FrameAligner.Evidence?) {
+        let lines = comparable(next, previous)
+        // Vision aliases on repeating rows; with a measured step it never gets a say.
+        let usesVision = aligner.usesVision && measuredScale == nil
         let axis = axis
         let hint = {
             usesVision ? FrameAligner.visionOffset(previous: previous.image, next: next.image, axis: axis) : nil
         }
-        return aligner.align(previous: Array(previous.hashes[range]), next: Array(next.hashes[range]),
-                             hint: hint, prior: FrameAligner.Prior(expectedStep: expectedStep))
+        let prior = FrameAligner.Prior(expectedStep: posted,
+                                       measuredOffsets: gauge.predictedOffsets(posted: posted, unit: stepUnit))
+        return aligner.decide(previous: lines.previous, next: lines.next, hint: hint, prior: prior)
     }
 
     /// Appends the strip `next` reveals beyond `previous`, `offset` lines further on.
     private func appendStrip(of next: Accepted, offset: Int, after previous: Accepted) -> AppendOutcome {
         guard let first else { return .unrelated }
-        let accepted = Accepted(image: next.image, frame: next.frame, hashes: next.hashes,
-                                position: previous.position + offset)
+        let accepted = next.moved(to: previous.position + offset)
         narrowEdges(with: next.hashes, first: first.hashes, isSecond: !edgesKnown)
         edgesKnown = true
         let canvas = self.canvas ?? seedCanvas(with: first.frame)
@@ -196,26 +257,39 @@ public actor Stitcher {
         return .appended(lines: count)
     }
 
-    /// Appends a seam marker and the whole moving band of `gap`, which becomes the new anchor
-    /// (returned, repositioned in content coordinates) along with the lines added.
+    /// Appends a seam marker and the moving band of `gap`, which becomes the new anchor (returned,
+    /// repositioned in content coordinates) along with the lines added. During auto-scroll, a `gap`
+    /// that overlaps the last placed frame only adds what lies beyond the image's end (#112);
+    /// otherwise all of it follows the seam.
     @discardableResult
-    private func appendGap(_ gap: Accepted) -> (accepted: Accepted, lines: Int) {
+    private func appendGap(_ gap: Accepted, posted: Int?) -> (accepted: Accepted, lines: Int) {
         guard let first, let previous = last else { return (gap, 0) }
         if !edgesKnown { edges = Self.solidEdges(previous.hashes, gap.hashes) }
         let canvas = self.canvas ?? seedCanvas(with: first.frame)
         let length = gap.frame.length(along: axis)
+        let position: Int
+        let start: Int
+        let overlaps: Bool
+        if let offset = overlap(of: gap, after: previous, posted: posted) {
+            position = previous.position + offset
+            start = max(canvasEnd - position, edges.leading)
+            overlaps = true
+        } else {
+            // Content coordinates restart past everything so far.
+            position = canvasEnd + length
+            start = edges.leading
+            overlaps = false
+        }
+        let anchor = gap.moved(to: position)
+        last = anchor
         var room = maxLength - edges.trailing - canvas.length
+        let count = max(0, min(length - edges.trailing - start, room - min(seamThickness, room)))
+        if overlaps, count == 0 { return (anchor, 0) } // nothing new: no gap to mark
         let seam = min(seamThickness, room)
         canvas.appendSeam(lines: seam)
         room -= seam
-        let start = edges.leading
-        let count = max(0, min(length - edges.trailing - start, room))
         canvas.append(lines: start..<start + count, of: gap.frame)
-        // Content coordinates restart past everything so far; the canvas ends at the gap's band.
-        let position = canvasEnd + length
         canvasEnd = position + start + count
-        let anchor = Accepted(image: gap.image, frame: gap.frame, hashes: gap.hashes, position: position)
-        last = anchor
         if canvas.length >= maxLength - edges.trailing { isFull = true }
         return (anchor, seam + count)
     }
@@ -231,7 +305,7 @@ public actor Stitcher {
     public func finish() -> CGImage? {
         if let held = pending, !isFull {
             pending = nil
-            appendGap(held.frame)
+            appendGap(held.frame, posted: held.posted)
         }
         return compose()
     }
@@ -241,21 +315,15 @@ public actor Stitcher {
         first = nil
         last = nil
         pending = nil
+        gauge = StepGauge()
+        autoScrolled = false
+        expectedStep = nil
+        stepUnit = nil
         edges = .none
         edgesKnown = false
         canvas = nil
         canvasEnd = 0
         isFull = false
-    }
-
-    /// Edges two unrelated frames share, cut back to their last line with detail: a real header
-    /// or footer has some, while blank space matching by chance has none.
-    static func solidEdges(_ one: [LineHash], _ other: [LineHash]) -> FixedEdges {
-        let pair = FixedEdgeDetector.detect(lineHashes: [one, other])
-        let count = one.count
-        let leading = (0..<pair.leading).last { one[$0].isInformative }.map { $0 + 1 } ?? 0
-        let trailing = ((count - pair.trailing)..<count).first { one[$0].isInformative }.map { count - $0 } ?? 0
-        return FixedEdges(leading: leading, trailing: trailing)
     }
 
     /// Fixed edges can only shrink: a line is fixed if it matches the first frame in every frame.
@@ -284,80 +352,30 @@ public actor Stitcher {
     }
 }
 
-/// An RGBA bitmap that grows along the scroll axis in doubling chunks, so appending stays
-/// linear overall instead of copying the whole image on every frame.
-final class GrowingCanvas {
-    let axis: ScrollAxis
-    let breadth: Int
-    let colorSpace: CGColorSpace
-    let maxLength: Int
-    private(set) var length = 0
-    private var storage: PixelFrame?
-
-    init(axis: ScrollAxis, breadth: Int, colorSpace: CGColorSpace?, maxLength: Int) {
-        self.axis = axis
-        self.breadth = breadth
-        self.colorSpace = colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-        self.maxLength = maxLength
+extension Stitcher {
+    /// Where `gap` overlaps `previous` during auto-scroll, so it isn't appended twice: the offset
+    /// the measured step predicts if the frames match there, else the smallest offset where they
+    /// match, the largest overlap (the next strip then starts after the last stitched row, never
+    /// before it: rows may be missing at the seam, but none repeat). Nil when they don't overlap,
+    /// or scrolling by hand.
+    private func overlap(of gap: Accepted, after previous: Accepted, posted: Int?) -> Int? {
+        guard posted != nil else { return nil }
+        let lines = comparable(gap, previous)
+        let minimumOverlap = max(FrameAligner.minimumOverlapLines,
+                                 Int(Double(lines.next.count) * aligner.minimumOverlapFraction))
+        let last = lines.next.count - minimumOverlap
+        guard last >= 1 else { return nil }
+        return aligner.firstMatch(previous: lines.previous, next: lines.next,
+                                  among: gauge.predictedOffsets(posted: posted, unit: stepUnit) + Array(1...last))
     }
 
-    private var capacity: Int { storage?.length(along: axis) ?? 0 }
-
-    /// Copies `lines` of `frame` onto the end of the canvas.
-    func append(lines: Range<Int>, of frame: PixelFrame) {
-        guard !lines.isEmpty else { return }
-        reserve(length + lines.count)
-        guard let storage else { return }
-        frame.copyLines(lines, along: axis, to: storage, at: length)
-        length += lines.count
-    }
-
-    /// Appends `lines` lines of a dashed red-and-white seam marking a gap in the content.
-    func appendSeam(lines: Int) {
-        guard lines > 0 else { return }
-        reserve(length + lines)
-        guard let storage else { return }
-        let red = UInt32(230) | UInt32(40) << 8 | UInt32(40) << 16 | 0xff00_0000
-        let white = UInt32(0xffff_ffff)
-        let rowPixels = storage.bytesPerRow / 4
-        let base = storage.pixels
-        let dash = max(4, lines * 3)
-        for line in length..<length + lines {
-            for index in 0..<breadth {
-                let color = (index / dash).isMultiple(of: 2) ? red : white
-                switch axis {
-                case .vertical: base[line * rowPixels + index] = color
-                case .horizontal: base[index * rowPixels + line] = color
-                }
-            }
-        }
-        length += lines
-    }
-
-    /// The canvas content followed by `extra` lines of `frame`, as a new image.
-    func makeImage(appending extra: Range<Int>, of frame: PixelFrame) -> CGImage? {
-        guard let output = makeBitmap(length: length + extra.count) else { return nil }
-        if let storage {
-            storage.copyLines(0..<length, along: axis, to: output, at: 0)
-        }
-        frame.copyLines(extra, along: axis, to: output, at: length)
-        return output.context.makeImage()
-    }
-
-    /// Grows storage to hold at least `needed` lines, doubling (min 1024 lines) up to `maxLength`.
-    private func reserve(_ needed: Int) {
-        guard needed > capacity else { return }
-        let target = min(max(needed, capacity * 2, 1024), max(needed, maxLength))
-        guard let grown = makeBitmap(length: target) else { return }
-        if let storage {
-            storage.copyLines(0..<length, along: axis, to: grown, at: 0)
-        }
-        storage = grown
-    }
-
-    private func makeBitmap(length: Int) -> PixelFrame? {
-        axis == .vertical
-            ? PixelFrame(width: breadth, height: length, colorSpace: colorSpace)
-            : PixelFrame(width: length, height: breadth, colorSpace: colorSpace)
+    /// Edges two unrelated frames share, cut back to their last line with detail: a real header
+    /// or footer has some, while blank space matching by chance has none.
+    static func solidEdges(_ one: [LineHash], _ other: [LineHash]) -> FixedEdges {
+        let pair = FixedEdgeDetector.detect(lineHashes: [one, other])
+        let count = one.count
+        let leading = (0..<pair.leading).last { one[$0].isInformative }.map { $0 + 1 } ?? 0
+        let trailing = ((count - pair.trailing)..<count).first { one[$0].isInformative }.map { count - $0 } ?? 0
+        return FixedEdges(leading: leading, trailing: trailing)
     }
 }

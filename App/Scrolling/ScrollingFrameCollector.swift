@@ -49,9 +49,9 @@ final class ScrollingFrameCollector {
     }
 
     /// Captures and appends one frame. `expectedStep` turns the frame's scale into the pixels
-    /// auto-scroll moved since the last frame (nil when scrolling manually).
-    /// Returns nil when the capture failed (`failure` is set).
-    func grab(expectedStep: (CGFloat) -> Int?) async -> Stitcher.AppendOutcome? {
+    /// auto-scroll posted since the last placed frame and the pixels of one step (nil when
+    /// scrolling manually). Returns nil when the capture failed (`failure` is set).
+    func grab(expectedStep: (CGFloat) -> (posted: Int, unit: Int)?) async -> Stitcher.AppendOutcome? {
         guard failure == nil else { return nil }
         let frame: CapturedImage
         do {
@@ -67,7 +67,8 @@ final class ScrollingFrameCollector {
         let pixels = Self.pixels(of: frame)
         lastFrameChanged = pixels == nil || pixels != lastPixels
         lastPixels = pixels
-        await active.setExpectedStep(expectedStep(frame.scale))
+        let motion = expectedStep(frame.scale)
+        await active.setExpectedStep(motion?.posted, unit: motion?.unit)
         let outcome = await active.append(frame: frame.cgImage)
         if case .gapDetected = outcome { hasGap = true }
         return outcome

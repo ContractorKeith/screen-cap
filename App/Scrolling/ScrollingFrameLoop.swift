@@ -85,8 +85,10 @@ final class ScrollingFrameLoop {
 
     private func grab() async -> Stitcher.AppendOutcome? {
         let distance = unplacedDistance
+        let step = scroller.step
         let outcome = await collector.grab { scale in
-            distance > 0 ? Int((CGFloat(distance) * scale).rounded()) : nil
+            guard distance > 0 else { return nil }
+            return (Int((CGFloat(distance) * scale).rounded()), Int((CGFloat(step) * scale).rounded()))
         }
         switch outcome {
         case .started, .appended, .gapDetected: unplacedDistance = 0
