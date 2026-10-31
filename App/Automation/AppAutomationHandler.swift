@@ -15,11 +15,12 @@ final class AppAutomationHandler: AutomationHandling {
         self.desktopIconsController = desktopIcons
     }
 
+    /// Scripts fire captures back to back, so these queue behind a running one (#79).
     func capture(_ kind: CaptureKind, rect: CGRect?, action: AfterCaptureAction?) {
         if let rect {
-            coordinator.capture(kind, rect: rect, action: action)
+            coordinator.capture(kind, rect: rect, action: action, queueIfBusy: true)
         } else {
-            coordinator.capture(kind, action: action)
+            coordinator.capture(kind, action: action, queueIfBusy: true)
         }
     }
 
