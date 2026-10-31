@@ -44,6 +44,26 @@ public struct UndoStack<State: Sendable>: Sendable {
         record(next, groupKey: groupKey)
     }
 
+    /// Every held state, oldest undo step first, then current, then redo steps.
+    public var allStates: [State] { undoStates + [current] + redoStates.reversed() }
+
+    /// Drops the oldest undo steps until current, redo and undo states together hold at most
+    /// `limit` distinct `key`s. Bounds memory when some states carry a large shared buffer
+    /// (the editor's base bitmap): steps that share a buffer cost nothing, so only steps that
+    /// introduced a new one count against the limit.
+    public mutating func limitDistinct<Key: Hashable>(_ limit: Int, by key: (State) -> Key) {
+        var seen = Set([current].map(key) + redoStates.map(key))
+        // Walk newest to oldest; the first undo state that would exceed the limit and
+        // everything older than it go.
+        for index in undoStates.indices.reversed() {
+            seen.insert(key(undoStates[index]))
+            if seen.count > limit {
+                undoStates.removeFirst(index + 1)
+                return
+            }
+        }
+    }
+
     /// Ends the open coalescing group so the next `record` starts a new undo step.
     public mutating func endGrouping() {
         openGroupKey = nil
