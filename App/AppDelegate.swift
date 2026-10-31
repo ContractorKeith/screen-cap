@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         history: Self.openHistory(),
         showOnboarding: { [weak self] in self?.onboarding.show() }
     )
+    private lazy var sinkRouter = CaptureSinkRouter(fallback: SavingCaptureSink(output: coordinator.output))
     private var shortcuts: ShortcutController?
     private var menuBar: MenuBarController?
 
@@ -27,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // No Dock icon. LSUIElement does this for the bundle; this covers `swift run`.
         NSApp.setActivationPolicy(.accessory)
+        coordinator.sink = sinkRouter
+        installFeatures()
         menuBar = MenuBarController(entries: AppMenu.entries(menuActions))
         let shortcuts = ShortcutController { [weak self] command in self?.perform(command) }
         shortcuts.register()
@@ -84,6 +87,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await task?.value
             NSApp.terminate(nil)
         }
+    }
+
+    // MARK: - Feature hooks
+
+    /// Each UI feature creates its controller here and assigns itself on `sinkRouter`
+    /// (overlay, annotate, pin). Keep one line per feature so parallel PRs merge cleanly.
+    private func installFeatures() {
     }
 
     private static func openHistory() -> HistoryStore? {
