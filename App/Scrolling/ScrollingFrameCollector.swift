@@ -12,8 +12,9 @@ extension CaptureService: ScrollingFrameSource {}
 /// How a scrolling capture ended once the user stopped it or a frame failed.
 enum ScrollingCaptureEnd {
     /// Deliver this image. `problem` is set when capture failed partway and this is what was
-    /// stitched before it; `gapAtEnd` when a held frame was kept after a seam on stop.
-    case image(CapturedImage, problem: String?, gapAtEnd: Bool)
+    /// stitched before it; `gapMarked` when the image has a seam marker (frames that didn't
+    /// line up, or a held frame kept on stop).
+    case image(CapturedImage, problem: String?, gapMarked: Bool)
     /// Nothing to deliver, because of this problem.
     case failed(String)
 
@@ -33,6 +34,12 @@ final class ScrollingFrameCollector {
     private(set) var lastFrame: CapturedImage?
     /// The first capture error; no more frames are taken after it.
     private(set) var failure: (any Error)?
+    /// Whether the last grabbed frame's pixels differ from the frame before it (true for the first).
+    private(set) var lastFrameChanged = true
+    /// A seam was marked while stitching.
+    private(set) var hasGap = false
+    /// Pixels of the last grabbed frame, to tell a still page from a moving one byte for byte.
+    private var lastPixels: Data?
 
     init(source: any ScrollingFrameSource, region: CGRect, axis: ScrollAxis, maxLength: Int) {
         self.source = source
@@ -57,15 +64,38 @@ final class ScrollingFrameCollector {
                                            maxLength: Int(CGFloat(maxLength) * frame.scale))
         stitcher = active
         lastFrame = frame
+        let pixels = Self.pixels(of: frame)
+        lastFrameChanged = pixels == nil || pixels != lastPixels
+        lastPixels = pixels
         await active.setExpectedStep(expectedStep(frame.scale))
-        return await active.append(frame: frame.cgImage)
+        let outcome = await active.append(frame: frame.cgImage)
+        if case .gapDetected = outcome { hasGap = true }
+        return outcome
+    }
+
+    /// Captures a frame without stitching it and reports whether it differs from the last
+    /// grabbed frame (an end-of-content probe). Nil when the capture failed (`failure` is set).
+    func peekChanged() async -> Bool? {
+        guard failure == nil else { return nil }
+        do {
+            let frame = try await source.captureArea(pointRect: region)
+            let pixels = Self.pixels(of: frame)
+            return pixels == nil || pixels != lastPixels
+        } catch {
+            failure = error
+            return nil
+        }
+    }
+
+    private static func pixels(of frame: CapturedImage) -> Data? {
+        frame.cgImage.dataProvider?.data as Data?
     }
 
     /// Builds the final image. Nil frames and no failure means there is nothing to report.
     func finish() async -> ScrollingCaptureEnd? {
         let problem = failure.map { Self.describe($0) }
         guard let stitcher, let lastFrame else { return problem.map { .failed($0) } }
-        let gapAtEnd = await stitcher.hasHeldFrame
+        let gapMarked = await stitcher.hasHeldFrame || hasGap
         guard let image = await stitcher.finish() else {
             return .failed(problem ?? ScrollingCaptureEnd.buildFailed)
         }
@@ -74,7 +104,7 @@ final class ScrollingFrameCollector {
         let origin = CGPoint(x: region.minX, y: region.maxY - size.height)
         let captured = CapturedImage(cgImage: image, scale: scale, pointRect: CGRect(origin: origin, size: size),
                                      displayID: lastFrame.displayID)
-        return .image(captured, problem: problem, gapAtEnd: gapAtEnd)
+        return .image(captured, problem: problem, gapMarked: gapMarked)
     }
 
     static func describe(_ error: any Error) -> String {

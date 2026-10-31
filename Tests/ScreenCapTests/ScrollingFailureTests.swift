@@ -66,14 +66,14 @@ struct ScrollingFailureTests {
         for _ in 0..<3 { #expect(await frames.grab { _ in nil } != nil) }
         #expect(await frames.grab { _ in nil } == nil)
         #expect(await frames.grab { _ in nil } == nil) // no more frames after a failure
-        guard case let .image(image, problem, gapAtEnd) = await frames.finish() else {
+        guard case let .image(image, problem, gapMarked) = await frames.finish() else {
             Issue.record("expected an image")
             return
         }
         #expect(image.cgImage.height == 500)
         #expect(image.pointRect == CGRect(x: 10, y: 320 - 500, width: 120, height: 500))
         #expect(problem == "The display was disconnected.")
-        #expect(!gapAtEnd)
+        #expect(!gapMarked)
     }
 
     @Test func cleanStopHasNoProblem() async {
@@ -93,11 +93,11 @@ struct ScrollingFailureTests {
         let frames = collector([0, 600])
         #expect(await frames.grab { _ in nil } == .started)
         #expect(await frames.grab { _ in nil } == .unrelated)
-        guard case let .image(image, problem, gapAtEnd) = await frames.finish() else {
+        guard case let .image(image, problem, gapMarked) = await frames.finish() else {
             Issue.record("expected an image")
             return
         }
-        #expect(gapAtEnd)
+        #expect(gapMarked)
         #expect(problem == nil)
         #expect(image.cgImage.height == 300 + 2 + 300)
     }

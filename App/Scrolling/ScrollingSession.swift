@@ -11,7 +11,7 @@ enum ScrollingMode: Equatable, Sendable {
 
 /// Why a scrolling capture stopped.
 enum ScrollingStopReason: Equatable, Sendable {
-    /// Two consecutive still frames while auto-scrolling.
+    /// Consecutive still frames while auto-scrolling, confirmed by a probe scroll (`ScrollingFrameLoop`).
     case endReached
     /// The stitcher hit the max length.
     case maxLengthReached
@@ -44,7 +44,9 @@ struct ScrollingSession: Equatable {
     private(set) var autoScroll: Bool
     /// Scroll axis. Fixed once capturing starts.
     private(set) var axis: ScrollAxis
-    private var stopRule = AutoScrollStopRule(noMovementLimit: 2)
+    /// Consecutive unchanged frames that end an auto-scroll.
+    static let stillFramesToEnd = 2
+    private var stopRule = AutoScrollStopRule(noMovementLimit: stillFramesToEnd)
 
     init(autoScroll: Bool = false, axis: ScrollAxis = .vertical) {
         self.autoScroll = autoScroll
@@ -74,7 +76,7 @@ struct ScrollingSession: Equatable {
     mutating func start() -> ScrollingMode? {
         guard phase == .selecting else { return nil }
         let mode: ScrollingMode = autoScroll ? .auto : .manual
-        stopRule = AutoScrollStopRule(noMovementLimit: 2)
+        stopRule = AutoScrollStopRule(noMovementLimit: Self.stillFramesToEnd)
         phase = .capturing(mode)
         return mode
     }
@@ -83,7 +85,7 @@ struct ScrollingSession: Equatable {
         guard !isFinal, phase != .finishing else { return }
         autoScroll = isOn
         if isCapturing {
-            stopRule = AutoScrollStopRule(noMovementLimit: 2)
+            stopRule = AutoScrollStopRule(noMovementLimit: Self.stillFramesToEnd)
             phase = .capturing(isOn ? .auto : .manual)
         }
     }
@@ -100,13 +102,14 @@ struct ScrollingSession: Equatable {
         if mode == .auto { phase = .capturing(.manual) }
     }
 
-    /// Feeds one stitcher outcome. Returns true when the capture should stop.
+    /// Feeds one stitcher outcome. Returns true when the capture should stop. `frameChanged`
+    /// (the content moved since the previous frame) is the evidence for the end; see `AutoScrollStopRule`.
     ///
     /// Max length stops either mode; still frames only end an auto-scroll (a manual user may pause).
     @discardableResult
-    mutating func record(_ outcome: Stitcher.AppendOutcome) -> Bool {
+    mutating func record(_ outcome: Stitcher.AppendOutcome, frameChanged: Bool? = nil) -> Bool {
         guard let mode else { return false }
-        let reason = stopRule.record(outcome)
+        let reason = stopRule.record(outcome, frameChanged: frameChanged)
         switch reason {
         case .maxLengthReached:
             finish(.maxLengthReached)

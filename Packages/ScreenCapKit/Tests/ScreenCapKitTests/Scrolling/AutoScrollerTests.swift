@@ -25,6 +25,38 @@ struct AutoScrollerTests {
         #expect(capped.record(.maxLengthReached) == .maxLengthReached)
     }
 
+    // #98: only changed-or-not decides the end, not the stitcher's guess on repeating rows.
+    @Test func stopRuleNeedsIdenticalFrames() {
+        var rule = AutoScrollStopRule()
+        #expect(rule.record(.started, frameChanged: true) == nil)
+        #expect(rule.record(.noMovement, frameChanged: true) == nil) // looked still but pixels moved
+        #expect(rule.record(.ambiguous, frameChanged: true) == nil)
+        #expect(rule.record(.ambiguous, frameChanged: true) == nil)
+        #expect(rule.record(.ambiguous, frameChanged: false) == nil)
+        #expect(rule.record(.appended(lines: 0), frameChanged: true) == nil) // progress resets
+        #expect(rule.record(.ambiguous, frameChanged: false) == nil)
+        #expect(rule.record(.noMovement, frameChanged: false) == .endReached)
+    }
+
+    // #98: arming posts nothing, so the first frame is taken before anything moves.
+    @Test func startPostsNothingUntilAdvance() async {
+        let poster = FakePoster(trusted: true)
+        let scroller = AutoScroller(step: 80, poster: poster)
+        #expect(scroller.start(at: .zero) == .scrolling)
+        await Task.yield()
+        #expect(poster.posts.isEmpty)
+        scroller.advance()
+        scroller.nudge(by: -80)
+        scroller.nudge(by: 80)
+        scroller.advance()
+        #expect(poster.posts == [80, -80, 80, 80])
+        #expect(scroller.takePostedDistance() == 160) // probes don't count
+        #expect(scroller.takePostedDistance() == 0)
+        scroller.cancel()
+        scroller.advance()
+        #expect(poster.posts.count == 4)
+    }
+
     @Test func needsAccessibilityWithoutPosting() async {
         let poster = FakePoster(trusted: false)
         let scroller = AutoScroller(poster: poster)
@@ -34,7 +66,7 @@ struct AutoScrollerTests {
     }
 
     @Test func stopsAtEndOfContent() {
-        let scroller = AutoScroller(interval: .seconds(60), poster: FakePoster(trusted: true))
+        let scroller = AutoScroller(poster: FakePoster(trusted: true))
         #expect(scroller.start(at: .zero) == .scrolling)
         scroller.record(.appended(lines: 120))
         scroller.record(.noMovement)
@@ -44,12 +76,12 @@ struct AutoScrollerTests {
     }
 
     @Test func stopsAtMaxLengthAndOnCancel() {
-        let capped = AutoScroller(interval: .seconds(60), poster: FakePoster(trusted: true))
+        let capped = AutoScroller(poster: FakePoster(trusted: true))
         capped.start(at: .zero)
         capped.record(.maxLengthReached)
         #expect(capped.state == .stopped(.maxLengthReached))
 
-        let cancelled = AutoScroller(interval: .seconds(60), poster: FakePoster(trusted: true))
+        let cancelled = AutoScroller(poster: FakePoster(trusted: true))
         cancelled.start(at: .zero)
         cancelled.cancel()
         #expect(cancelled.state == .stopped(.cancelled))
