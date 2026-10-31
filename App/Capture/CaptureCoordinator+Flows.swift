@@ -3,17 +3,17 @@ import ScreenCapKit
 
 // One flow per capture kind. Everything here runs on the main actor between awaits.
 extension CaptureCoordinator {
-    func run(_ kind: CaptureKind, action: AfterCaptureAction?) async throws {
+    func run(_ kind: CaptureKind, action: AfterCaptureAction?, app: FrontApp?) async throws {
         let geometry = DisplayGeometry.fromCurrentScreens()
-        let windows = (try? await service.shareableWindows()) ?? []
-        let context = frontContext(windows: windows)
+        let windows = (try? await source.shareableWindows()) ?? []
+        let context = frontContext(windows: windows, app: app)
         let flow = Flow(kind: kind, geometry: geometry, context: context, action: action)
         switch kind {
         case .fullscreen:
             try await captureFullscreen(flow)
         case .previousArea:
             if let rect = previousArea.rect(validIn: geometry) {
-                await deliver(try await service.captureArea(pointRect: rect), flow)
+                await deliver(try await source.captureArea(pointRect: rect), flow)
             } else {
                 try await select(flow, windows: windows)
             }
@@ -31,10 +31,11 @@ extension CaptureCoordinator {
     }
 
     /// A capture at a known rect (URL scheme regions), skipping interactive selection.
-    func run(_ kind: CaptureKind, rect: CGRect, action: AfterCaptureAction?) async throws {
+    func run(_ kind: CaptureKind, rect: CGRect, action: AfterCaptureAction?, app: FrontApp?) async throws {
         let geometry = DisplayGeometry.fromCurrentScreens()
-        let windows = (try? await service.shareableWindows()) ?? []
-        let flow = Flow(kind: kind, geometry: geometry, context: frontContext(windows: windows), action: action)
+        let windows = (try? await source.shareableWindows()) ?? []
+        let flow = Flow(kind: kind, geometry: geometry, context: frontContext(windows: windows, app: app),
+                        action: action)
         switch kind {
         case .allInOne:
             try await select(flow, windows: windows, preselected: rect)
@@ -46,12 +47,12 @@ extension CaptureCoordinator {
             try await recognizeText(rect, stills: [], flow)
         case .area, .previousArea, .window, .fullscreen:
             previousArea.remember(rect)
-            await deliver(try await service.captureArea(pointRect: rect), flow)
+            await deliver(try await source.captureArea(pointRect: rect), flow)
         }
     }
 
-    func runWindow(ofApp app: String, action: AfterCaptureAction?) async throws {
-        let windows = WindowPicker(windows: try await service.shareableWindows()).windows
+    func runWindow(ofApp app: String, action: AfterCaptureAction?, front: FrontApp?) async throws {
+        let windows = WindowPicker(windows: try await source.shareableWindows()).windows
         let match = windows.first {
             $0.appName?.caseInsensitiveCompare(app) == .orderedSame || $0.bundleIdentifier == app
         }
@@ -60,7 +61,7 @@ extension CaptureCoordinator {
             throw WindowNotFound(app: app)
         }
         let flow = Flow(kind: .window, geometry: DisplayGeometry.fromCurrentScreens(),
-                        context: frontContext(windows: windows), action: action)
+                        context: frontContext(windows: windows, app: front), action: action)
         try await captureWindow(window, flow)
     }
 
@@ -87,7 +88,7 @@ extension CaptureCoordinator {
     private func select(_ flow: Flow, windows: [ShareableWindow], preselected: CGRect? = nil) async throws {
         // Frozen stills only when they're shown and used: live mode and the self-timer capture after.
         let freezes = settings.freezeScreen && flow.kind != .selfTimer
-        let stills = freezes ? try await service.captureAllDisplays() : []
+        let stills = freezes ? try await source.captureAllDisplays() : []
         let options = SelectionOptions(
             showsStill: freezes,
             showsCrosshair: settings.showCrosshair,
@@ -115,7 +116,7 @@ extension CaptureCoordinator {
         if flow.kind == .selfTimer {
             guard await selfTimer.countdown(seconds: settings.selfTimerSeconds, around: window.frame) else { return }
         }
-        let image = try await service.captureWindow(id: window.id, includeShadow: settings.windowShadow)
+        let image = try await source.captureWindow(id: window.id, includeShadow: settings.windowShadow)
         let context = FilenameTemplate.Context(app: window.appName ?? flow.context.app, window: window.title)
         await deliver(image, flow, as: .window, context: context)
     }
@@ -144,7 +145,7 @@ extension CaptureCoordinator {
                 await deliver(still, flow, as: .fullscreen)
             } else {
                 try await Task.sleep(for: Self.overlayHideDelay)
-                await deliver(try await service.captureDisplay(display.id), flow, as: .fullscreen)
+                await deliver(try await source.captureDisplay(display.id), flow, as: .fullscreen)
             }
         case .scrolling:
             await scroll(rect, flow)
@@ -163,16 +164,22 @@ extension CaptureCoordinator {
             return image
         }
         try await Task.sleep(for: Self.overlayHideDelay)
-        return try await service.captureArea(pointRect: rect)
+        return try await source.captureArea(pointRect: rect)
     }
 
     // MARK: - Other flows
 
     /// OCR of a selected area, awaited so `--quit` waits for it. Without a handler, posts the rect.
+    /// Every path (shortcut, menu, All-In-One, URL region) lands here, and the `.text` History record
+    /// is written here rather than in the handler, so its OCR text is searchable (#53, #72).
     private func recognizeText(_ rect: CGRect, stills: [CapturedImage], _ flow: Flow) async throws {
         guard let textHandler else { return post(.captureTextRequested, rect: rect) }
         let image = try await areaImage(rect, stills: stills, geometry: flow.geometry)
-        try await textHandler(image.cgImage)
+        let recordID = await TextCaptureController.addTextRecord(image, context: flow.context, to: history)
+        let text = try await textHandler(image.cgImage)
+        if let recordID, let history, let text, !text.isEmpty {
+            await TextCaptureController.storeText(text, recordID: recordID, in: history)
+        }
         record(.delivered)
     }
 
@@ -182,13 +189,13 @@ extension CaptureCoordinator {
             return
         }
         try await Task.sleep(for: Self.overlayHideDelay)
-        await deliver(try await service.captureArea(pointRect: rect), flow, as: .selfTimer)
+        await deliver(try await source.captureArea(pointRect: rect), flow, as: .selfTimer)
     }
 
     /// The display under the cursor, or every display as separate files.
     private func captureFullscreen(_ flow: Flow) async throws {
         if settings.fullscreenAllDisplays {
-            for image in try await service.captureAllDisplays() {
+            for image in try await source.captureAllDisplays() {
                 await deliver(image, flow)
             }
             return
@@ -197,7 +204,7 @@ extension CaptureCoordinator {
         guard let display = flow.geometry.display(containing: mouse) ?? flow.geometry.primaryDisplay else {
             throw CaptureError.areaOffScreen(CGRect(origin: mouse, size: .zero))
         }
-        await deliver(try await service.captureDisplay(display.id), flow)
+        await deliver(try await source.captureDisplay(display.id), flow)
     }
 
     /// Scrolling capture runs inside this capture task, so `--quit` waits for it.
