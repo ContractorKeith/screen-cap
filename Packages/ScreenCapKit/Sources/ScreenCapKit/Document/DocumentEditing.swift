@@ -64,6 +64,8 @@ extension Document {
 
     /// Scales an annotation so its bounds become `newBounds`.
     /// Zero-width or zero-height bounds (a horizontal line) keep that axis's scale at 1.
+    /// Kinds with a uniform size (a counter's radius) take the scale of the axis that changed,
+    /// so a side handle grows them; when both axes change they take the smaller scale.
     public mutating func resize(_ id: UUID, to newBounds: CGRect) {
         guard let index = index(of: id) else { return }
         let old = annotations[index].kind.bounds
@@ -71,7 +73,9 @@ extension Document {
         let target = newBounds.standardized
         let scaleX = old.width > 0 ? target.width / old.width : 1
         let scaleY = old.height > 0 ? target.height / old.height : 1
-        annotations[index].kind = annotations[index].kind.mapped(scale: min(scaleX, scaleY)) {
+        let unchanged = { (scale: Double) in abs(scale - 1) < 1e-9 }
+        let uniform = unchanged(scaleY) ? scaleX : unchanged(scaleX) ? scaleY : min(scaleX, scaleY)
+        annotations[index].kind = annotations[index].kind.mapped(scale: uniform) {
             CGPoint(x: target.minX + ($0.x - old.minX) * scaleX,
                     y: target.minY + ($0.y - old.minY) * scaleY)
         }
