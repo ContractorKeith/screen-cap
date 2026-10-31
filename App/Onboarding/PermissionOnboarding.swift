@@ -153,8 +153,11 @@ final class PermissionOnboardingController: NSObject, NSWindowDelegate {
             newWindow.styleMask = [.titled, .closable]
             newWindow.isReleasedWhenClosed = false
             newWindow.delegate = self
-            newWindow.center()
+            // Sized to its content before centering, so it opens centered and on screen (#115).
+            WindowPlacement.placeNew(newWindow, autosaveName: "ScreenCapWelcomeWindow")
             window = newWindow
+        } else if let window {
+            WindowPlacement.clampOnScreen(window)
         }
         model.startPolling()
         NSApp.activate(ignoringOtherApps: true)
