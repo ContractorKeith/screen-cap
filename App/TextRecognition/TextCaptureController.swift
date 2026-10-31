@@ -15,8 +15,9 @@ enum TextRecognitionPreferences {
 ///
 /// Listens for `.captureTextRequested`. userInfo is one of `rect` (NSValue, global points; the
 /// coordinator after the selection overlay, or a URL region), `image` (CGImage; Quick Access, editor)
-/// or `url` (image file URL; `screencap://capture-text?filepath=`). Optional `recordID` (UUID) puts
-/// the text in history for search; optional `lineBreaks` (Bool) overrides the Keep Line Breaks setting.
+/// or `url` (image file URL; `screencap://capture-text?filepath=`). Optional `recordID` (UUID) or
+/// `result` (CaptureResult) names the history record the text is stored on; optional `lineBreaks`
+/// (Bool) overrides the Keep Line Breaks setting. A fresh `rect` grab becomes a new `.text` record (#53).
 @MainActor
 final class TextCaptureController {
     private let settings: AppSettings
@@ -36,19 +37,24 @@ final class TextCaptureController {
         observer = NotificationCenter.default.addObserver(
             forName: .captureTextRequested, object: nil, queue: .main
         ) { [weak self] note in
-            let info = note.userInfo
-            let request = Request(
-                rect: (info?[AutomationKey.rect] as? NSValue)?.rectValue,
-                image: Self.cgImage(info?[QuickAccessUserInfo.image]).map(SendableImage.init),
-                url: info?[AutomationKey.url] as? URL,
-                recordID: info?[AutomationKey.recordID] as? UUID,
-                lineBreaks: info?[AutomationKey.lineBreaks] as? Bool
-            )
+            let request = Self.request(from: note.userInfo)
             MainActor.assumeIsolated {
                 guard let self else { return }
                 Task { await self.handle(request) }
             }
         }
+    }
+
+    /// Reads a `.captureTextRequested` payload. The record ID comes from `recordID`, or from the
+    /// `result` Quick Access and the editor send.
+    nonisolated static func request(from info: [AnyHashable: Any]?) -> Request {
+        let rect = (info?["rect"] as? NSValue)?.rectValue
+        let image = cgImage(info?["image"])
+        let recordID = info?["recordID"] as? UUID ?? (info?["result"] as? CaptureResult)?.historyRecordID
+        return Request(
+            rect: rect, image: image.map(SendableImage.init), url: info?[AutomationKey.url] as? URL,
+            recordID: recordID, lineBreaks: info?[AutomationKey.lineBreaks] as? Bool
+        )
     }
 
     /// A CGImage from a userInfo value, checked by type ID (CF casts always "succeed").
@@ -85,7 +91,9 @@ final class TextCaptureController {
                 // The overlay just closed; wait for the window server to redraw, then grab the area live.
                 try await Task.sleep(for: CaptureCoordinator.overlayHideDelay)
                 let captured = try await service.captureArea(pointRect: rect)
-                try await recognize(captured.cgImage, recordID: request.recordID, keepLineBreaks: request.lineBreaks)
+                let recordID = await Self.addTextRecord(captured, to: history)
+                try await recognize(captured.cgImage, recordID: request.recordID ?? recordID,
+                                    keepLineBreaks: request.lineBreaks)
             }
         } catch {
             appLog.error("Capture Text failed: \(String(describing: error), privacy: .public)")
@@ -121,11 +129,29 @@ final class TextCaptureController {
             HUDPanel.show(outcome.message)
         }
         if let recordID, let history, !text.isEmpty {
-            do {
-                _ = try await history.setOCRText(id: recordID, text: text.text(keepLineBreaks: true))
-            } catch {
-                appLog.error("History OCR update failed: \(error.localizedDescription, privacy: .public)")
-            }
+            await Self.storeText(text.text(keepLineBreaks: true), recordID: recordID, in: history)
+        }
+    }
+
+    /// Adds a fresh Capture Text grab to history as a `.text` record so its text is searchable.
+    static func addTextRecord(_ image: CapturedImage, to history: HistoryStore?) async -> UUID? {
+        guard let history else { return nil }
+        do {
+            return try await history.add(image: image.cgImage, kind: .text,
+                                         metadata: CaptureMetadata(scale: Double(image.scale))).id
+        } catch {
+            appLog.error("History write failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// Stores OCR text on a history record for search, then lets an open History window reload.
+    static func storeText(_ text: String, recordID: UUID, in history: HistoryStore) async {
+        do {
+            _ = try await history.setOCRText(id: recordID, text: text)
+            NotificationCenter.default.post(name: .historyRecordsChanged, object: nil)
+        } catch {
+            appLog.error("History OCR update failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 }
