@@ -11,15 +11,17 @@ struct AdvancedSettingsPane: View {
     @State private var autoUpdate = false
     @State private var confirmingReset = false
     @State private var status: String?
+    /// A shorter retention waiting for confirmation (#101).
+    @State private var pendingRetention: RetentionChange?
 
     static let retentionChoices = [1, 7, 14, 30, 60, 90]
 
     var body: some View {
         Form {
             Section("History") {
-                Picker("Keep captures for", selection: $settings.historyRetentionDays) {
+                Picker("Keep captures for", selection: retentionBinding) {
                     ForEach(Self.retentionChoices, id: \.self) { days in
-                        Text(days == 1 ? "1 day" : "\(days) days").tag(days)
+                        Text(RetentionChange.days(days)).tag(days)
                     }
                 }
                 HStack {
@@ -66,6 +68,42 @@ struct AdvancedSettingsPane: View {
         } message: {
             Text("Shortcuts, saved captures, update checks and Launch at Login are not changed.")
         }
+        .confirmationDialog(pendingRetention?.title ?? "", isPresented: confirmingRetention,
+                            presenting: pendingRetention) { change in
+            Button("Delete", role: .destructive) { finishRetention(change, confirmed: true) }
+            Button("Cancel", role: .cancel) { finishRetention(change, confirmed: false) }
+        } message: { change in
+            Text(change.message)
+        }
+    }
+
+    /// The picker writes through here so a shorter window that deletes captures asks first.
+    private var retentionBinding: Binding<Int> {
+        Binding(get: { settings.historyRetentionDays }, set: { requestRetention($0) })
+    }
+
+    private var confirmingRetention: Binding<Bool> {
+        Binding(get: { pendingRetention != nil }, set: { if !$0 { pendingRetention = nil } })
+    }
+
+    private func requestRetention(_ days: Int) {
+        let current = settings.historyRetentionDays
+        guard days < current, let history else {
+            settings.historyRetentionDays = days
+            return
+        }
+        Task {
+            let count = await history.count(olderThan: days)
+            switch RetentionChange.decide(from: current, to: days, expiring: count) {
+            case let .apply(value): settings.historyRetentionDays = value
+            case let .confirm(change): pendingRetention = change
+            }
+        }
+    }
+
+    private func finishRetention(_ change: RetentionChange, confirmed: Bool) {
+        settings.historyRetentionDays = change.resolve(confirmed: confirmed)
+        pendingRetention = nil
     }
 
     private func purge() {

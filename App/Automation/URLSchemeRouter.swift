@@ -8,6 +8,10 @@ import ScreenCapKit
 protocol AutomationHandling: AnyObject {
     /// `rect` is in global AppKit points; nil means the normal interactive flow.
     func capture(_ kind: CaptureKind, rect: CGRect?, action: AfterCaptureAction?)
+    /// OCR of a region (global AppKit points); queues behind a running capture like `capture`.
+    func captureText(rect: CGRect, lineBreaks: Bool)
+    /// Scrolling capture of a region with the URL flags; queues behind a running capture.
+    func scrollingCapture(rect: CGRect, start: Bool, autoscroll: Bool)
     func post(_ name: Notification.Name, userInfo: [String: Any])
     func openFromClipboard()
     func openSettings(tab: AutomationCommand.SettingsTab?)
@@ -111,16 +115,14 @@ final class URLSchemeRouter {
     }
 
     /// No region: the normal scrolling flow (select, then the scrolling feature takes over).
-    /// With a region: hand it straight to the scrolling feature with the flags.
+    /// With a region: hand it to the scrolling feature with the flags, through the capture queue.
     private func scrolling(region: Region?, start: Bool, autoscroll: Bool) {
         guard let region else {
             handler.capture(.scrolling, rect: nil, action: nil)
             return
         }
         guard let rect = globalRect(region) else { return }
-        handler.post(.scrollingCaptureRequested, userInfo: [
-            AutomationKey.rect: NSValue(rect: rect), AutomationKey.start: start, AutomationKey.autoscroll: autoscroll
-        ])
+        handler.scrollingCapture(rect: rect, start: start, autoscroll: autoscroll)
     }
 
     private func captureText(_ source: AutomationCommand.TextSource?, lineBreaks: Bool) {
@@ -133,9 +135,7 @@ final class URLSchemeRouter {
             ])
         case let .region(region):
             guard let rect = globalRect(region) else { return }
-            handler.post(.captureTextRequested, userInfo: [
-                AutomationKey.rect: NSValue(rect: rect), AutomationKey.lineBreaks: lineBreaks
-            ])
+            handler.captureText(rect: rect, lineBreaks: lineBreaks)
         }
     }
 

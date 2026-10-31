@@ -177,8 +177,10 @@ final class EditorDocumentModel {
     }
 
     /// Flattened image of the document at `scale` output pixels per document pixel.
+    /// Automatic redaction flags are resolved first, so a near-opaque bar over text paints solid
+    /// on the canvas, in exports and in the preview, as it's baked on save (#99).
     func renderedImage(scale: Double = 1, hiding hidden: UUID? = nil) throws -> CGImage {
-        var document = document
+        var document = documentForSave
         if let hidden { document.annotations.removeAll { $0.id == hidden } }
         return try renderer.image(for: document, baseImage: baseImage, layers: renderLayers,
                                   options: RenderOptions(scale: scale))

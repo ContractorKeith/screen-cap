@@ -80,6 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         desktopIcons.show()
+        // Open Quick Access panels count as closed so Restore Recently Closed finds them (#103).
+        if let quickAccess = sinkRouter.overlay as? QuickAccessController, let history {
+            QuickAccessQuit.recordClosedBeforeExit(quickAccess.openRecordIDs, in: history)
+        }
     }
 
     private var menuActions: AppMenu.Actions {
@@ -126,7 +130,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ScrollingCaptureController.install(on: coordinator)
         sinkRouter.pin = pins
         textCapture.install()
-        coordinator.textHandler = { [textCapture] image in try await textCapture.recognize(image) }
+        coordinator.textHandler = { [textCapture] image, lineBreaks in
+            try await textCapture.recognize(image, keepLineBreaks: lineBreaks)
+        }
         sinkRouter.overlay = QuickAccessController(settings: settings, output: coordinator.output,
                                                    history: coordinator.history, router: sinkRouter)
     }
