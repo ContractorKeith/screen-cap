@@ -192,10 +192,16 @@ enum EditorGeometry {
 
     /// Points along a quadratic Bézier, for hit-testing curved arrows.
     static func quadSamples(_ start: CGPoint, _ control: CGPoint, _ end: CGPoint, count: Int = 24) -> [CGPoint] {
-        (0...count).map { step in
-            let along = Double(step) / Double(count), rest = 1 - along
-            return CGPoint(x: rest * rest * start.x + 2 * rest * along * control.x + along * along * end.x,
-                           y: rest * rest * start.y + 2 * rest * along * control.y + along * along * end.y)
+        (0...count).map { step -> CGPoint in
+            let along = Double(step) / Double(count)
+            let rest = 1 - along
+            // Bernstein weights, kept as named values so the type checker stays fast.
+            let w0: Double = rest * rest
+            let w1: Double = 2 * rest * along
+            let w2: Double = along * along
+            let x: Double = w0 * start.x + w1 * control.x + w2 * end.x
+            let y: Double = w0 * start.y + w1 * control.y + w2 * end.y
+            return CGPoint(x: x, y: y)
         }
     }
 
