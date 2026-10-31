@@ -14,7 +14,7 @@ final class ScrollingCaptureController {
     private let poster: any ScrollEventPosting
     private let launch: ScrollingLaunchOptions
 
-    private var session = ScrollingSession()
+    private(set) var session = ScrollingSession()
     private let model = ScrollingPanelModel()
     private var panels: [NSPanel] = []
     weak var controlPanel: NSPanel?
@@ -26,20 +26,24 @@ final class ScrollingCaptureController {
     /// The last held frame was ambiguous (repeating rows) rather than a jump; picks the hint.
     private var heldBecauseRepeating = false
     /// `--region` or a URL with `start=true` starts the next capture without waiting for Start.
-    private var startsImmediately = false
+    var startsImmediately = false
     /// Auto-scroll for the next capture from a URL (`autoscroll=`); nil uses the launch option or setting.
     private var autoScrollOverride: Bool?
     private var requestObserver: NSObjectProtocol?
+    /// Where screen-parameter changes are posted; a private center in tests.
+    let notificationCenter: NotificationCenter
+    var displayObserver: NSObjectProtocol?
 
     init(coordinator: CaptureCoordinator, settings: ScrollingSettings = .shared,
          poster: any ScrollEventPosting = SystemScrollEventPoster(),
          launch: ScrollingLaunchOptions = .parse(CommandLine.arguments),
-         frameSource: (any ScrollingFrameSource)? = nil) {
+         frameSource: (any ScrollingFrameSource)? = nil, notificationCenter: NotificationCenter = .default) {
         self.coordinator = coordinator
         self.frameSource = frameSource ?? coordinator.service
         self.settings = settings
         self.poster = poster
         self.launch = launch
+        self.notificationCenter = notificationCenter
     }
 
     /// Hooks into the coordinator's `.scrolling` flow. Called once from `installFeatures()`.
@@ -66,7 +70,11 @@ final class ScrollingCaptureController {
                                    axis: settings.horizontal ? .horizontal : .vertical)
         session.beginSelection()
         showUI(around: region)
-        defer { hideUI() }
+        watchDisplays()
+        defer {
+            hideUI()
+            unwatchDisplays()
+        }
         syncModel()
 
         if startsNow { session.start() }
@@ -85,6 +93,7 @@ final class ScrollingCaptureController {
         let reason = String(describing: session.stopReason)
         appLog.notice("Scrolling capture stopped: \(reason, privacy: .public)")
         hideUI()
+        unwatchDisplays()
         await conclude(end, context: context, action: action)
     }
 
@@ -195,13 +204,21 @@ final class ScrollingCaptureController {
         }
     }
 
+    /// The displays changed (see `watchDisplays`): stop and keep what was stitched (#127).
+    func displaysChanged() {
+        guard !session.isFinal, session.phase != .finishing else { return }
+        appLog.notice("Scrolling capture: display configuration changed")
+        session.displayChanged()
+        poke()
+    }
+
     // MARK: - User actions
 
     private func waitForUser() async {
         await withCheckedContinuation { wake = $0 }
     }
 
-    private func poke() {
+    func poke() {
         syncModel()
         wake?.resume()
         wake = nil
@@ -290,6 +307,11 @@ extension ScrollingCaptureController {
     fileprivate func conclude(_ end: ScrollingCaptureEnd?, context: FilenameTemplate.Context,
                               action: AfterCaptureAction?) async {
         switch end {
+        case nil where session.stopReason == .displayChanged, .failed where session.stopReason == .displayChanged:
+            session.delivered(hasImage: false)
+            appLog.error("Scrolling capture: display changed before anything was stitched")
+            coordinator.record(.failed(Self.displayChangedProblem))
+            CaptureHUD.show(Self.displayChangedTitle)
         case nil:
             session.delivered(hasImage: false)
         case let .failed(problem):
@@ -300,7 +322,11 @@ extension ScrollingCaptureController {
         case let .image(image, problem, gapMarked):
             session.delivered(hasImage: true)
             await coordinator.deliver(image, kind: .scrolling, context: context, action: action)
-            if let problem {
+            if session.stopReason == .displayChanged {
+                // Delivered, but cut short: `--quit` reports it as a failure.
+                coordinator.record(.failed(Self.displayChangedProblem))
+                CaptureHUD.show(Self.displayChangedTitle, detail: "What was stitched before the change was kept.")
+            } else if let problem {
                 appLog.error("Scrolling capture stopped early: \(problem, privacy: .public)")
                 coordinator.record(.failed(problem))
                 CaptureHUD.show("Scrolling capture stopped early",

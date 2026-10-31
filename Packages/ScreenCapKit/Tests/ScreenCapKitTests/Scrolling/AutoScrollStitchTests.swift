@@ -11,11 +11,11 @@ import Testing
 struct AutoScrollStitchTests {
     typealias Line = ScrollFixtures.Line
 
-    /// Keeps alpha and the top 7 bits of each channel: the dither only flips the lowest bit.
+    /// Keeps alpha and the top 6 bits of each channel: the dither only flips the lowest two.
     static func rowHash(_ line: Line) -> Int {
         line.withUnsafeBufferPointer { pixels in
             var hasher = Hasher()
-            for pixel in pixels { hasher.combine(pixel & 0xfffe_fefe) }
+            for pixel in pixels { hasher.combine(pixel & 0xfffc_fcfc) }
             return hasher.finalize()
         }
     }
@@ -28,10 +28,12 @@ struct AutoScrollStitchTests {
     }
 
     /// Scrolls `page` (lines) through a `viewport`-line region: each frame the scroller posts
-    /// `posted` pixels and the page moves `moved` (or `jumps[frame]` into that frame), clamped at
-    /// the end. Posted distance carries over frames the stitcher doesn't place, as in
-    /// `ScrollingFrameLoop`.
+    /// `posted` pixels and the page moves `moved` (or `jumps[frame]` into that frame, or the next of
+    /// `pattern` when given: live Terminal moves unevenly), clamped at the end. Posted distance
+    /// carries over frames the stitcher doesn't place, as in `ScrollingFrameLoop`. `noise` is the
+    /// dither mask XORed into every frame.
     static func autoScroll(_ page: [Line], viewport: Int, posted: Int, moved: Int, jumps: [Int: Int] = [:],
+                           pattern: [Int] = [], noise: UInt32 = 0x0001_0101, knob: Bool = false,
                            usesVision: Bool = true) async throws -> Run {
         let stitcher = Stitcher(axis: .vertical, scale: 2, aligner: FrameAligner(usesVision: usesVision))
         let end = page.count - viewport
@@ -41,14 +43,16 @@ struct AutoScrollStitchTests {
         var stillFrames = 0
         while stillFrames < 2 {
             await stitcher.setExpectedStep(distance > 0 ? distance : nil, unit: posted)
-            let outcome = await stitcher.append(frame: Self.frame(page, top: top, viewport: viewport))
+            let outcome = await stitcher.append(frame: Self.frame(page, top: top, viewport: viewport, noise: noise,
+                                                                  knob: knob))
             outcomes.append(outcome)
             switch outcome {
             case .started, .appended, .gapDetected: distance = 0
             default: break
             }
             stillFrames = top == end ? stillFrames + 1 : 0
-            top = min(end, top + (jumps[outcomes.count] ?? moved))
+            let step = pattern.isEmpty ? moved : pattern[(outcomes.count - 1) % pattern.count]
+            top = min(end, top + (jumps[outcomes.count] ?? step))
             distance += posted
         }
         let image = try #require(await stitcher.finish())
@@ -61,16 +65,24 @@ struct AutoScrollStitchTests {
 
     /// The region at `top` with screen-fixed dither: each pixel's low bits flip by its position on
     /// the screen (a 64×64 tile, like the live captures), not by the content under it.
-    static func frame(_ page: [Line], top: Int, viewport: Int) -> CGImage {
+    /// `knob` draws an overlay scroll-bar knob at the right edge, fixed on screen and creeping
+    /// down as the page scrolls, like Terminal's while it scrolls (#126).
+    static func frame(_ page: [Line], top: Int, viewport: Int, noise: UInt32 = 0x0001_0101,
+                      knob: Bool = false) -> CGImage {
         let width = page[0].count
         var pixels = [UInt32](repeating: 0, count: width * viewport)
+        let knobLength = viewport / 3
+        let knobTop = (viewport - knobLength) * top / max(1, page.count - viewport)
         pixels.withUnsafeMutableBufferPointer { output in
             dither.withUnsafeBufferPointer { dither in
                 for row in 0..<viewport {
                     page[top + row].withUnsafeBufferPointer { line in
                         let tile = (row % 64) * 64
                         for column in 0..<width {
-                            output[row * width + column] = line[column] ^ dither[tile + column % 64]
+                            let inKnob = knob && column >= width - 22 && column < width - 6
+                                && (knobTop..<knobTop + knobLength).contains(row)
+                            let pixel = inKnob ? ScrollFixtures.pixel(110, 110, 110) : line[column]
+                            output[row * width + column] = pixel ^ (dither[tile + column % 64] & noise)
                         }
                     }
                 }
@@ -91,7 +103,7 @@ struct AutoScrollStitchTests {
 
     static let dither: [UInt32] = {
         var random = SeededGenerator(seed: 64)
-        return (0..<64 * 64).map { _ in UInt32(truncatingIfNeeded: random.next()) & 0x0001_0101 }
+        return (0..<64 * 64).map { _ in UInt32(truncatingIfNeeded: random.next()) & 0x0003_0303 }
     }()
 
     /// Expects the stitched rows to be the page's rows, in order: nothing dropped, nothing twice.

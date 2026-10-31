@@ -23,6 +23,10 @@ final class ScrollingFrameLoop {
     let settle: Duration
     /// Unchanged frames in a row.
     private var stillFrames = 0
+    /// Still, blank frames in a row, passed over as if they moved.
+    private var blankFrames = 0
+    /// Steps of blank space scrolled through before it counts as the end.
+    static let blankFramesToEnd = 8
     /// Points posted since the last frame the stitcher placed: frames the page hadn't redrawn for
     /// yet, or that were held back, still sit between it and the next one.
     private var unplacedDistance = 0
@@ -43,9 +47,19 @@ final class ScrollingFrameLoop {
 
     private func capture() async -> Frame? {
         let scrolling = scroller.state == .scrolling
-        unplacedDistance = scrolling ? unplacedDistance + scroller.takePostedDistance() : 0
+        let posted = scrolling ? scroller.takePostedDistance() : 0
+        unplacedDistance = scrolling ? unplacedDistance + posted : 0
+        if posted > 0, await !collector.settle(tries: Self.settleTries) { return nil }
         guard let outcome = await grab() else { return nil }
         var frame = Frame(outcome: outcome, changed: moved(outcome))
+        // Blank space looks still while the page scrolls through it (the scrollback a region starts
+        // on): it only ends the run after `blankFramesToEnd` steps, so content below is reached.
+        if scrolling, !frame.changed, collector.lastFrameIsBlank, blankFrames < Self.blankFramesToEnd {
+            blankFrames += 1
+            frame = Frame(outcome: outcome, changed: true)
+        } else if frame.changed || !collector.lastFrameIsBlank {
+            blankFrames = 0
+        }
         stillFrames = frame.changed ? 0 : stillFrames + 1
         if scrolling, stillFrames >= ScrollingSession.stillFramesToEnd, outcome != .maxLengthReached {
             switch await probe() {
@@ -75,12 +89,17 @@ final class ScrollingFrameLoop {
         try? await Task.sleep(for: settle)
         // Didn't move back either: the page doesn't scroll any further, whichever way.
         guard wentBack else { return .end }
-        guard let outcome = await grab() else { return nil }
+        guard await collector.settle(tries: Self.settleTries), let outcome = await grab() else { return nil }
         return moved(outcome) ? .moved(Frame(outcome: outcome, changed: true)) : .end
     }
 
+    /// Grabs allowed for the page to stop moving after a scroll step before the frame is taken anyway.
+    static let settleTries = 4
+
+    /// The content moved: the pixels changed beyond capture noise, and the stitcher didn't find the
+    /// frame in place (a blinking cursor or a fading scroll bar changes pixels without moving).
     private func moved(_ outcome: Stitcher.AppendOutcome) -> Bool {
-        collector.lastFrameChanged && outcome != .noMovement
+        collector.lastFrameChangedBeyondNoise && outcome != .noMovement
     }
 
     private func grab() async -> Stitcher.AppendOutcome? {

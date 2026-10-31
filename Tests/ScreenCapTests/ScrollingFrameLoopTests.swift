@@ -151,7 +151,9 @@ struct ScrollingFrameLoopTests {
     @Test func firstFrameIsCapturedBeforeTheFirstScroll() async {
         let page = FakePage(image: TerminalFixture.page, viewport: 600)
         _ = await autoScroll(page, limit: 3)
-        #expect(Array(page.log.prefix(4)) == [.frame(top: 0), .scroll(100), .frame(top: 100), .scroll(100)])
+        // After each step the loop waits for the page to settle (#126): extra grabs, no extra scrolls.
+        #expect(Array(page.log.prefix(3)) == [.frame(top: 0), .scroll(100), .frame(top: 100)])
+        #expect(Array(page.scrolls.prefix(2)) == [100, 100])
     }
 
     // #98 cause 2: repeating Terminal output auto-scrolls to the real end and stitches the whole page.
@@ -175,7 +177,8 @@ struct ScrollingFrameLoopTests {
     @Test func lateRedrawIsNotTheEnd() async throws {
         let page = FakePage(image: TerminalFixture.page, viewport: 600)
         let run = await autoScroll(page) { index in
-            if index == 4 { page.staleCaptures = 2 } // frames 4 and 5 repeat frame 3
+            // Redraws later than the settle grabs allow, so stale frames still reach the stitcher.
+            if index == 4 { page.staleCaptures = ScrollingFrameLoop.settleTries + 2 }
         }
         #expect(run.session.stopReason == .endReached)
         #expect(page.top == 5400)
@@ -214,6 +217,15 @@ struct ScrollingFrameLoopTests {
         #expect(run.frames.suffix(2).allSatisfy { !$0.changed })
     }
 
+    // #126: the region starts on blank scrollback (900 px, more than a screen). Blank frames look
+    // still while the page moves, and the probe can't see blank space move: that's not the end.
+    @Test func blankStartIsNotTheEnd() async {
+        let page = FakePage(image: TerminalFixture.blankTopPage, viewport: 600)
+        let run = await autoScroll(page)
+        #expect(run.session.stopReason == .endReached)
+        #expect(page.top == TerminalFixture.blankTopPage.height - 600)
+    }
+
     // A page that doesn't scroll at all ends after the probe instead of running forever.
     @Test func pageThatNeverMovesEnds() async {
         let page = FakePage(image: TerminalFixture.prefixPage, viewport: 600)
@@ -232,4 +244,18 @@ extension TerminalFixture {
     // Exactly one viewport of the page: nothing to scroll. Fixture geometry is always valid.
     // swiftlint:disable:next force_unwrapping
     fileprivate static let prefixPage = page.cropping(to: CGRect(x: 0, y: 0, width: 600, height: 600))!
+
+    /// `page` under 900 px of blank scrollback, like the region of #126 at the start.
+    fileprivate static let blankTopPage: CGImage = {
+        let blank = 900
+        // Fixture geometry is always valid. swiftlint:disable force_unwrapping
+        let context = CGContext(data: nil, width: page.width, height: page.height + blank, bitsPerComponent: 8,
+                                bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: page.width, height: page.height + blank))
+        context.draw(page, in: CGRect(x: 0, y: 0, width: page.width, height: page.height))
+        return context.makeImage()!
+        // swiftlint:enable force_unwrapping
+    }()
 }

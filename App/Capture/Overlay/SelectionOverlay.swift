@@ -9,9 +9,11 @@ import ScreenCapKit
 final class SelectionOverlay {
     let state: SelectionState
     let options: SelectionOptions
-    let geometry: DisplayGeometry
+    /// The display arrangement; rebuilt when the displays change under the overlay (#131).
+    private(set) var geometry: DisplayGeometry
     let picker: WindowPicker
-    private let stills: [CapturedImage]
+    /// Frozen stills; emptied (live mode) if a display change leaves them stale (#131).
+    private(set) var stills: [CapturedImage]
     private let sampler: PixelSampler?
     /// Latest live region under the pointer when the magnifier samples live (#90).
     private(set) var liveSample: CapturedImage?
@@ -21,6 +23,7 @@ final class SelectionOverlay {
     private(set) var views: [SelectionView] = []
     private var panels: [OverlayPanel] = []
     private var continuation: CheckedContinuation<SelectionOutcome, Never>?
+    private var displayObserver: NSObjectProtocol?
     var toolbar: AllInOneToolbar?
     var sizeField: FixedSizeField?
 
@@ -45,6 +48,20 @@ final class SelectionOverlay {
     private func show() {
         state.mouse = NSEvent.mouseLocation
         if state.mode == .window { state.hoveredWindow = picker.window(at: state.mouse) }
+        layOutPanels()
+        NSCursor.crosshair.push()
+        startLiveSampling()
+        displayObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.displaysChanged(to: DisplayGeometry.fromCurrentScreens()) }
+        }
+        let mode = String(describing: state.mode)
+        appLog.notice("Selection overlay on \(self.panels.count) display(s), mode \(mode, privacy: .public)")
+    }
+
+    /// One panel per display of `geometry`, showing its still if frozen.
+    private func layOutPanels() {
         for display in geometry.displays {
             let still = stills.first { $0.displayID == display.id }
             let panel = OverlayPanel(frame: display.frame)
@@ -55,10 +72,43 @@ final class SelectionOverlay {
             views.append(view)
         }
         focusPanel(at: state.mouse)
-        NSCursor.crosshair.push()
-        startLiveSampling()
-        let mode = String(describing: state.mode)
-        appLog.notice("Selection overlay on \(self.panels.count) display(s), mode \(mode, privacy: .public)")
+    }
+
+    /// The displays changed while selecting (#131): rebuild the panels on the new arrangement so
+    /// every display is covered and nothing selectable is off-screen. Stills that no longer match
+    /// their display are dropped (live mode from here on); a selection that's now off-screen is cleared.
+    func displaysChanged(to newGeometry: DisplayGeometry) {
+        guard !finished, newGeometry != geometry, !newGeometry.displays.isEmpty else { return }
+        let refresh = OverlayDisplayRefresh.make(stills: stills, rect: state.rect, previousRect: state.previousRect,
+                                                 geometry: newGeometry)
+        let frozeBefore = !stills.isEmpty
+        geometry = refresh.geometry
+        stills = refresh.stills
+        liveSample = nil
+        // Toolbar and size field live in the old panels' views; they go with them.
+        let toolbarWasVisible = state.toolbarVisible
+        hideToolbar()
+        sizeField?.removeFromSuperview()
+        sizeField = nil
+        if refresh.rect != state.rect {
+            state.rect = nil
+            state.dragStart = nil
+            state.fixedSize = nil
+        }
+        state.previousRect = refresh.previousRect
+        if state.lastSelection.map({ OverlayDisplayRefresh.make(stills: [], rect: $0, previousRect: nil,
+                                                                 geometry: newGeometry).rect == nil }) == true {
+            state.lastSelection = nil
+        }
+        state.mouse = NSEvent.mouseLocation
+        if state.mode == .window { state.hoveredWindow = picker.window(at: state.mouse) }
+        panels.forEach { $0.orderOut(nil) }
+        panels.removeAll()
+        views.removeAll()
+        layOutPanels()
+        if toolbarWasVisible, let rect = state.rect { showToolbar(for: rect) }
+        let summary = "\(geometry.displays.count) display(s), frozen \(frozeBefore) -> \(!stills.isEmpty)"
+        appLog.notice("Selection overlay rebuilt after a display change: \(summary, privacy: .public)")
     }
 
     /// Image layer (the frozen still) under the transparent drawing view.
@@ -141,6 +191,8 @@ final class SelectionOverlay {
         guard let continuation else { return }
         self.continuation = nil
         finished = true
+        displayObserver.map(NotificationCenter.default.removeObserver)
+        displayObserver = nil
         sampleTimer?.invalidate()
         sampleTimer = nil
         liveSample = nil

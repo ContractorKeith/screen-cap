@@ -21,6 +21,9 @@ enum ScrollingStopReason: Equatable, Sendable {
     case escape
     /// A frame couldn't be captured (permission revoked, display gone); what was stitched is kept.
     case failed
+    /// The display configuration changed (resolution, scale, a display added or removed): the
+    /// region no longer covers the same pixels, so what was stitched before is kept (#127).
+    case displayChanged
 }
 
 /// Scrolling capture state machine. Pure, so it is unit-tested; the controller drives the UI from it.
@@ -134,6 +137,11 @@ struct ScrollingSession: Equatable {
     /// A frame capture failed: stop and keep what was stitched. Before Start it cancels.
     mutating func fail() {
         if isCapturing { finish(.failed) } else { cancel() }
+    }
+
+    /// The displays changed mid-capture: stop and keep what was stitched. Before Start it cancels.
+    mutating func displayChanged() {
+        if isCapturing { finish(.displayChanged) } else { cancel() }
     }
 
     mutating func cancel() {

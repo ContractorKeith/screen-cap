@@ -70,6 +70,10 @@ public struct FrameAligner: Sendable {
     static let minimumAnchors = 3
     /// How close (pixels) a candidate must be to the auto-scroll distance.
     static let stepTolerance = 3
+    /// How much worse than the best tied offset the measured step's offset may score and still decide.
+    static let confirmMargin = 0.005
+    /// The score the measured step's offset needs to decide: lines up all but a few windows.
+    static let measuredConfidence = 0.97
 
     public init(minimumConfidence: Double = 0.6, minimumOverlapFraction: Double = 0.05, usesVision: Bool = true) {
         self.minimumConfidence = minimumConfidence
@@ -150,15 +154,26 @@ public struct FrameAligner: Sendable {
     }
 
     /// Picks one of several equally good clusters, or nil when nothing tells them apart:
-    /// 1. the measured auto-scroll step: the first predicted offset that lies in a cluster (#112);
+    /// 1. the measured auto-scroll step: the first predicted offset that lies in a cluster (#112),
+    ///    unless another cluster scores better (#126: a jump of whole periods), which holds the frame;
     /// 2. anchors, if they back one cluster clearly (Vision decides between backed clusters);
     /// 3. the posted auto-scroll distance before any step is measured, if exactly one cluster lies
     ///    within `stepTolerance` of it.
     static func choose(_ clusters: [[Int]], scores: [Double], votes: [Int: Int], hint: () -> Int?,
                        prior: Prior) -> (offset: Int, evidence: Evidence)? {
+        let top = clusters.map { scores[best(in: $0, scores: scores)] }.max() ?? 0
         for expected in prior.measuredOffsets {
             let near = { (offset: Int) in abs(offset - expected) <= stepTolerance }
             if let cluster = clusters.first(where: { $0.contains(where: near) }) {
+                // Another offset lines up better than the step's (#126): on repeating output that's
+                // the page moving a whole period more or less, where only marker rows (`-- step 30 --`
+                // against `-- step 40 --`) tell. Neither is safe to pick: hold the frame, so a gap
+                // is marked instead of rows dropped or repeated silently.
+                // Below `measuredConfidence`, the step's offset only lines up as well as any whole number
+                // of text lines would: no evidence the page moved by the step at all.
+                let score = scores[best(in: cluster.filter(near), scores: scores)]
+                guard score >= measuredConfidence else { break }
+                guard score + confirmMargin >= top else { return nil }
                 let offset = cluster.filter(near).min { abs($0 - expected) < abs($1 - expected) } ?? expected
                 return (offset, .measured)
             }

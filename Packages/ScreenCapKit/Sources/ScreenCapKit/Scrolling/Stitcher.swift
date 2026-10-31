@@ -120,6 +120,10 @@ public actor Stitcher {
     /// Nil until one did.
     public var measuredScale: Double? { gauge.scale }
 
+    /// Pixels at the end of each line left out of noise-tolerant matching: an overlay scroll bar
+    /// (16 pt) moves on its own while the content scrolls under it (#126).
+    var scrollBarMargin: Int { Int((16 * scale).rounded()) }
+
     /// Lines in a gap's seam marker.
     var seamThickness: Int { max(2, Int((2 * scale).rounded())) }
 
@@ -129,7 +133,7 @@ public actor Stitcher {
         guard let first, let last else {
             guard let frame = PixelFrame(image: image) else { return .unrelated }
             let seed = Accepted(image: image, frame: frame, hashes: frame.lineHashes(along: axis),
-                                profiles: frame.lineProfiles(along: axis), position: 0)
+                                profiles: frame.lineProfiles(along: axis, trailingMargin: scrollBarMargin), position: 0)
             self.first = seed
             self.last = seed
             return .started
@@ -140,7 +144,7 @@ public actor Stitcher {
             return .unrelated
         }
         let next = Accepted(image: image, frame: frame, hashes: frame.lineHashes(along: axis),
-                            profiles: frame.lineProfiles(along: axis), position: 0)
+                            profiles: frame.lineProfiles(along: axis, trailingMargin: scrollBarMargin), position: 0)
         let posted = expectedStep
 
         let (alignment, evidence) = align(next, to: last, posted: posted)

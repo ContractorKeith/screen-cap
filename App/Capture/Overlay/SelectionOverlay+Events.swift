@@ -146,7 +146,7 @@ extension SelectionOverlay {
 
     // MARK: - All-In-One toolbar
 
-    private func showToolbar(for rect: CGRect) {
+    func showToolbar(for rect: CGRect) {
         hideToolbar()
         guard let view = view(for: rect) else { return }
         let bar = AllInOneToolbar { [weak self] choice in self?.choose(choice) }
