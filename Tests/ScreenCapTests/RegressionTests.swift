@@ -257,27 +257,56 @@ struct ErrorHandlingRegressionTests {
 
 // MARK: - #77 build number
 
+/// Runs the real stamping step (`scripts/stamp-version.sh`, which bundle.sh calls) on a copy of the
+/// shipped Info.plist, so it needs no built app (CI tests before `make bundle`, #135).
 @Suite("Regression: #77 build number")
 struct BuildNumberRegressionTests {
-    @Test func bundleScriptStampsTheBuildNumber() throws {
-        let script = try String(contentsOf: repoRoot.appendingPathComponent("scripts/bundle.sh"), encoding: .utf8)
-        #expect(script.contains("git rev-list --count HEAD"))
-        #expect(script.contains("Set :CFBundleVersion"))
-        #expect(script.contains("scripts/check-bundle.sh"))
+    private struct Stamped {
+        let status: Int32
+        let info: [String: Any]
     }
 
-    /// When a bundle has been built (`make bundle`, CI), its build number must not be the source "1".
-    @Test func builtBundleHasARealBuildNumber() throws {
-        let plist = repoRoot.appendingPathComponent("build/ScreenCap.app/Contents/Info.plist")
-        guard let info = NSDictionary(contentsOf: plist) as? [String: Any] else { return }
-        // A bundle older than scripts/bundle.sh predates the stamping change; CI always rebuilds first.
-        let script = repoRoot.appendingPathComponent("scripts/bundle.sh")
-        let modified = { (url: URL) in
-            (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        }
-        if let plistDate = modified(plist), let scriptDate = modified(script), plistDate < scriptDate { return }
-        let build = try #require(Int(info["CFBundleVersion"] as? String ?? ""))
+    private func stamp(buildNumber: String?) throws -> Stamped {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("stamp-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let plist = folder.appendingPathComponent("Info.plist")
+        try FileManager.default.copyItem(at: repoRoot.appendingPathComponent("App/Resources/Info.plist"), to: plist)
+
+        let process = Process()
+        process.executableURL = repoRoot.appendingPathComponent("scripts/stamp-version.sh")
+        process.arguments = [plist.path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["BUILD_NUMBER"] = buildNumber
+        process.environment = environment
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        let info = try #require(NSDictionary(contentsOf: plist) as? [String: Any])
+        return Stamped(status: process.terminationStatus, info: info)
+    }
+
+    @Test func stampsTheCommitCountAndVersion() throws {
+        let source = try #require(NSDictionary(contentsOf: repoRoot.appendingPathComponent("App/Resources/Info.plist")))
+        #expect(source["CFBundleVersion"] as? String == "1") // the value that must never ship
+
+        let stamped = try stamp(buildNumber: nil)
+        #expect(stamped.status == 0)
+        let build = try #require(Int(stamped.info["CFBundleVersion"] as? String ?? ""))
         #expect(build > 1)
-        #expect(info["CFBundleShortVersionString"] as? String == ScreenCapKit.version)
+        #expect(stamped.info["CFBundleShortVersionString"] as? String == ScreenCapKit.version)
+    }
+
+    @Test func overrideIsUsedAndABuildNumberOfOneIsRefused() throws {
+        #expect(try stamp(buildNumber: "4242").info["CFBundleVersion"] as? String == "4242")
+        let refused = try stamp(buildNumber: "1")
+        #expect(refused.status != 0)
+        #expect(refused.info["CFBundleVersion"] as? String == "1")
+    }
+
+    @Test func bundleScriptRunsTheStampAndTheCheck() throws {
+        let script = try String(contentsOf: repoRoot.appendingPathComponent("scripts/bundle.sh"), encoding: .utf8)
+        #expect(script.contains("scripts/stamp-version.sh \"$CONTENTS/Info.plist\""))
+        #expect(script.contains("scripts/check-bundle.sh"))
     }
 }
