@@ -16,7 +16,7 @@ final class ScrollingCaptureController {
     private var session = ScrollingSession()
     private let model = ScrollingPanelModel()
     private var panels: [NSPanel] = []
-    private weak var controlPanel: NSPanel?
+    weak var controlPanel: NSPanel?
     private let previewView = ScrollingPreviewView()
     private var keyMonitors: [Any] = []
     private var wake: CheckedContinuation<Void, Never>?
