@@ -9,67 +9,123 @@ extension EditorWindowController {
     static let projectType = UTType(filenameExtension: ProjectFile.fileExtension, conformingTo: .package) ?? .package
 
     @objc func saveDocument(_ sender: Any?) {
-        saveDocument(sender, thenClose: false)
+        saveDocument()
     }
 
     /// ⌘S: writes the `.screencap` package in place, or asks where the first time.
-    func saveDocument(_ sender: Any?, thenClose: Bool) {
+    /// `done` gets true once the project is written, false if the user cancels or the write fails.
+    func saveDocument(then done: (@MainActor (Bool) -> Void)? = nil) {
         canvas.commitTextEditing()
         if let url = model.fileURL {
-            writeProject(to: url, thenClose: thenClose)
+            writeProject(to: url, then: done)
         } else {
-            saveDocumentAs(sender, thenClose: thenClose)
+            saveDocumentAs(then: done)
         }
     }
 
     @objc func saveDocumentAs(_ sender: Any?) {
-        saveDocumentAs(sender, thenClose: false)
+        saveDocumentAs()
     }
 
-    private func saveDocumentAs(_ sender: Any?, thenClose: Bool) {
-        guard let window else { return }
+    private func saveDocumentAs(then done: (@MainActor (Bool) -> Void)? = nil) {
+        guard let window else { done?(false); return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [Self.projectType]
         panel.nameFieldStringValue = suggestedName() + "." + ProjectFile.fileExtension
         panel.message = "Saves an editable ScreenCap project. Use Export… for an image file."
         panel.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
-                guard response == .OK, let url = panel.url else { return }
-                self?.writeProject(to: url, thenClose: thenClose)
+                guard response == .OK, let url = panel.url, let self else { done?(false); return }
+                self.writeProject(to: url, then: done)
             }
         }
     }
 
-    private func writeProject(to url: URL, thenClose: Bool) {
-        if model.needsRedactionBakeConfirmation(), let window {
-            confirmRedactionBake(in: window) { [weak self] in self?.writeProject(to: url, thenClose: thenClose) }
-            return
+    /// Resolves automatic redaction flags, asks about opaque shapes not used as redactions and the
+    /// one-time bake confirmation, then writes. Each sheet re-enters here once answered.
+    private func writeProject(to url: URL, then done: (@MainActor (Bool) -> Void)?) {
+        Task { @MainActor [weak self] in
+            guard let self else { done?(false); return }
+            await self.model.detectedTextLines()
+            guard let window = self.window else { done?(false); return }
+            let unmarked = self.model.unmarkedOpaqueCovers
+            if !unmarked.isEmpty {
+                self.warnAboutOpaqueShapes(unmarked, in: window) { [weak self] proceed in
+                    if proceed { self?.writeProject(to: url, then: done) } else { done?(false) }
+                }
+                return
+            }
+            if self.model.needsRedactionBakeConfirmation() {
+                self.confirmRedactionBake(in: window) { [weak self] proceed in
+                    if proceed { self?.finishWrite(to: url, then: done) } else { done?(false) }
+                }
+                return
+            }
+            self.finishWrite(to: url, then: done)
         }
+    }
+
+    private func finishWrite(to url: URL, then done: (@MainActor (Bool) -> Void)?) {
         do {
             try model.saveProject(to: url)
             window?.isDocumentEdited = false
             window?.title = url.deletingPathExtension().lastPathComponent
+            window?.representedURL = url
             flash("Saved")
-            if thenClose { forceClose() }
+            done?(true)
         } catch {
             present(error)
+            done?(false)
         }
     }
 
-    /// One-time sheet: saving a project flattens blur and pixelate, so they can't be edited later.
-    private func confirmRedactionBake(in window: NSWindow, then save: @escaping @MainActor () -> Void) {
+    /// Opaque shapes that hide something on screen but aren't redactions keep the pixels beneath
+    /// them in the project (#74). Offers to make them redactions, or to keep them as plain shapes.
+    private func warnAboutOpaqueShapes(_ shapes: [Annotation], in window: NSWindow,
+                                       then proceed: @escaping @MainActor (Bool) -> Void) {
+        let names = shapes.map(\.displayName)
         let alert = NSAlert()
-        alert.messageText = "Blur and pixelate will be made permanent"
-        alert.informativeText = "To keep hidden content out of the file, ScreenCap saves blurred and pixelated "
-            + "areas (and anything beneath them) as flattened pixels. The project won't contain the original, "
-            + "so these redactions can't be moved or removed after you reopen it. Other objects stay editable."
+        alert.messageText = shapes.count == 1
+            ? "This opaque shape isn’t a redaction"
+            : "\(shapes.count) opaque shapes aren’t redactions"
+        alert.informativeText = "\(names.joined(separator: ", ")). The project file keeps the original pixels "
+            + "under them, so anyone with the file can remove the shape or open base.png and see what it covers. "
+            + "Redactions are flattened into the image when you save."
+        alert.addButton(withTitle: "Use as Redactions")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Keep Editable")
+        let ids = Set(shapes.map(\.id))
+        alert.beginSheetModal(for: window) { [weak self] response in
+            MainActor.assumeIsolated {
+                switch response {
+                case .alertFirstButtonReturn:
+                    self?.model.setRedaction(true, for: ids)
+                    proceed(true)
+                case .alertThirdButtonReturn:
+                    self?.model.setRedaction(false, for: ids)
+                    proceed(true)
+                default:
+                    proceed(false)
+                }
+            }
+        }
+    }
+
+    /// One-time sheet: saving a project flattens redactions, so they can't be edited later.
+    private func confirmRedactionBake(in window: NSWindow, then proceed: @escaping @MainActor (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Redactions will be made permanent"
+        alert.informativeText = "To keep hidden content out of the file, ScreenCap saves blur, pixelate and shapes "
+            + "used as redactions (and anything beneath them) as flattened pixels. The project won't contain the "
+            + "original, so these redactions can't be moved or removed after you reopen it. Other objects stay "
+            + "editable. Opaque shapes not used as redactions keep the original pixels under them."
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         alert.beginSheetModal(for: window) { response in
             MainActor.assumeIsolated {
-                guard response == .alertFirstButtonReturn else { return }
+                guard response == .alertFirstButtonReturn else { proceed(false); return }
                 UserDefaults.standard.set(true, forKey: EditorDocumentModel.redactionBakeConfirmedKey)
-                save()
+                proceed(true)
             }
         }
     }
@@ -121,29 +177,33 @@ extension EditorWindowController {
     }
 
     /// One-click save with the capture save folder, filename template, format and scale.
+    /// The name is reserved with an exclusive create, like capture saves, so it never overwrites.
     @objc func saveToDesktop(_ sender: Any?) {
         canvas.commitTextEditing()
         let options = settings.saveOptions
         do {
-            try FileManager.default.createDirectory(at: options.folder, withIntermediateDirectories: true)
-            let url = options.template().uniqueURL(in: options.folder, context: model.filenameContext)
             let scale = min(1, Double(options.scale.factor) / max(model.document.baseImage.scale, 1))
             let format = ExportFormat(options.format, quality: options.jpegQuality)
-            try model.exportData(format: format, scale: scale).write(to: url, options: .atomic)
+            let data = try model.exportData(format: format, scale: scale)
+            try FileManager.default.createDirectory(at: options.folder, withIntermediateDirectories: true)
+            _ = try EditorFileWriter.write(data, template: options.template(), in: options.folder,
+                                           context: model.filenameContext)
             flash("Saved to \(options.folder.lastPathComponent)")
         } catch {
             present(error)
         }
     }
 
-    /// Share sheet with a temporary PNG of the render.
+    /// Share sheet with a temporary PNG of the render, under a reserved name so two editors
+    /// sharing the same suggested name don't overwrite each other's file.
     func share(from view: NSView? = nil) {
         canvas.commitTextEditing()
         do {
+            let data = try model.exportData(format: .png)
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenCap", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let url = folder.appendingPathComponent(suggestedName() + ".png")
-            try model.exportData(format: .png).write(to: url, options: .atomic)
+            let url = try EditorFileWriter.write(data, template: EditorFileWriter.literal(suggestedName()),
+                                                 in: folder)
             let picker = NSSharingServicePicker(items: [url])
             let anchor = view ?? window?.contentView ?? canvas
             let rect = view == nil ? CGRect(x: anchor.bounds.maxX - 120, y: anchor.bounds.maxY - 40, width: 1,
@@ -159,6 +219,30 @@ extension EditorWindowController {
         let options = settings.saveOptions
         let file = options.template().filename(context: model.filenameContext)
         return (file as NSString).deletingPathExtension
+    }
+}
+
+/// Writes editor output under a name claimed with `FilenameTemplate.reserveUniqueURL`, the same
+/// exclusive create capture saves use (#48), so a concurrent save (another process too) can't overwrite it.
+enum EditorFileWriter {
+    /// Reserves a free name in `folder`, writes `data` over the placeholder and returns the URL.
+    /// Removes the placeholder if the write fails.
+    static func write(_ data: Data, template: FilenameTemplate, in folder: URL,
+                      context: FilenameTemplate.Context = .init()) throws -> URL {
+        let url = try template.reserveUniqueURL(in: folder, context: context)
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
+    }
+
+    /// A PNG template that renders `name` as typed: braces are swapped so no token expands.
+    static func literal(_ name: String) -> FilenameTemplate {
+        let safe = name.replacingOccurrences(of: "{", with: "(").replacingOccurrences(of: "}", with: ")")
+        return FilenameTemplate(safe, format: .png)
     }
 }
 

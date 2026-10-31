@@ -108,8 +108,10 @@ final class TextCaptureController {
     }
 
     /// Runs OCR and barcode reading, copies the result and shows the HUD.
-    /// `keepLineBreaks` nil uses the Keep Line Breaks setting.
-    func recognize(_ image: CGImage, recordID: UUID? = nil, keepLineBreaks: Bool? = nil) async throws {
+    /// `keepLineBreaks` nil uses the Keep Line Breaks setting. Returns the OCR text for History
+    /// (line breaks kept), or nil if none was found; with `recordID` it is also stored on that record.
+    @discardableResult
+    func recognize(_ image: CGImage, recordID: UUID? = nil, keepLineBreaks: Bool? = nil) async throws -> String? {
         let languages = settings.ocrLanguages
         async let codes = BarcodeReader().read(in: image)
         let text = try await recognizer.recognize(in: image, languages: languages)
@@ -128,17 +130,22 @@ final class TextCaptureController {
         } else {
             HUDPanel.show(outcome.message)
         }
-        if let recordID, let history, !text.isEmpty {
-            await Self.storeText(text.text(keepLineBreaks: true), recordID: recordID, in: history)
+        guard !text.isEmpty else { return nil }
+        let historyText = text.text(keepLineBreaks: true)
+        if let recordID, let history {
+            await Self.storeText(historyText, recordID: recordID, in: history)
         }
+        return historyText
     }
 
     /// Adds a fresh Capture Text grab to history as a `.text` record so its text is searchable.
-    static func addTextRecord(_ image: CapturedImage, to history: HistoryStore?) async -> UUID? {
+    static func addTextRecord(_ image: CapturedImage, context: FilenameTemplate.Context? = nil,
+                              to history: HistoryStore?) async -> UUID? {
         guard let history else { return nil }
+        let metadata = CaptureMetadata(scale: Double(image.scale), appName: context?.app,
+                                       windowTitle: context?.window)
         do {
-            return try await history.add(image: image.cgImage, kind: .text,
-                                         metadata: CaptureMetadata(scale: Double(image.scale))).id
+            return try await history.add(image: image.cgImage, kind: .text, metadata: metadata).id
         } catch {
             appLog.error("History write failed: \(error.localizedDescription, privacy: .public)")
             return nil

@@ -26,22 +26,33 @@ Capture.screencap/
 
 ## Redactions are baked on save
 
-Blur and pixelate exist to hide something, so a package must never carry the pixels they
-cover. When a document has any `blur` or `pixelate` annotation, ScreenCap's writer
-(`ProjectFile.bakingRedactions`) flattens it into `base.png` before writing:
+Redactions exist to hide something, so a package must never carry the pixels they cover.
+A redaction is any `blur` or `pixelate` annotation, plus any annotation with
+`"redaction": true` (a filled shape used as a redaction bar). ScreenCap's writer
+(`ProjectFile.bakingRedactions`) flattens them into `base.png` before writing:
 
-- Every `blur` and `pixelate` is rendered into `base.png` and removed from `annotations`.
+- Every redaction is rendered into `base.png` and removed from `annotations`.
 - So is every annotation drawn beneath one of them whose painted area overlaps it, directly
   or through another baked annotation (a text box, an arrow, an image layer under a blur).
   Their data (text strings, `layers/*.png`) is not written. Layers no longer referenced are
   dropped.
 - Annotations drawn above the redactions are written normally and stay editable.
 
+**Opaque shapes.** A filled rectangle, filled ellipse, black highlight or background text label
+hides what's under it on screen, but unless it's a redaction the original pixels stay in
+`base.png`, where anyone with the file can see them by removing the shape or opening
+`base.png`. Only redactions remove the original. In the editor, "Use as redaction" in the
+inspector controls this per shape. Until it's toggled, it's on automatically for a fully opaque
+shape over text Vision finds in the image. When a save would keep an opaque shape that isn't a
+redaction, the editor lists those shapes and offers to make them redactions or keep them
+editable (`"redaction": false`).
+
 **Trade-off:** after the project is reopened, baked redactions can't be moved, resized or
 removed, because the original pixels are gone. The open editor keeps them editable until the
 window closes, and each save bakes again from that state. Baked objects are clipped to the base
-image (anything over background padding is lost). The editor shows a one-time confirmation
-before the first save that bakes. Spotlight is not a redaction and is not baked.
+image (anything over background padding is lost). A redaction that isn't fully opaque is baked
+as it looks, so what shows through it stays visible in `base.png`. The editor shows a one-time
+confirmation before the first save that bakes. Spotlight is not a redaction and is not baked.
 
 So `base.png` is "the captured image, with redactions applied," and `preview.png` shows the
 same thing.
@@ -101,6 +112,7 @@ A shadow is `{"color": color, "radius": number, "offset": size}`.
 | `zIndex` | int | draw order, higher on top |
 | `style` | object | `strokeColor` color, `strokeWidth` number, `fillColor` color?, `shadow` shadow?, `opacity` 0…1 |
 | `kind` | enum | one of the kinds below |
+| `redaction` | bool? | "Use as redaction". `true` is baked on save (so ScreenCap never writes it); `false` keeps the shape editable; absent means automatic (see above). Optional, added without a schema bump. |
 
 Kinds (fields of each case):
 

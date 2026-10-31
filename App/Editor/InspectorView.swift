@@ -57,6 +57,7 @@ struct StylePanel: View {
                 model.updateStyle { $0.shadow = isOn ? Document.Shadow() : nil }
             })
             KindOptionsSection(model: model)
+            RedactionToggle(model: model)
         }
     }
 
@@ -173,6 +174,37 @@ struct KindOptionsSection: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+/// "Use as redaction" for filled shapes (#74). Automatic until toggled: on for an opaque shape
+/// over text Vision found in the image.
+struct RedactionToggle: View {
+    @Bindable var model: EditorDocumentModel
+
+    private var shapes: [Annotation] { model.selectedAnnotations.filter(\.canBeRedaction) }
+
+    var body: some View {
+        if let first = shapes.first {
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Use as redaction", isOn: Binding { model.isRedaction(first) } set: { isOn in
+                    model.setRedaction(isOn, for: Set(shapes.map(\.id)))
+                })
+                .help("Saving a project flattens redactions into the image, so the pixels beneath them "
+                    + "aren't kept in the file. They can't be moved or removed after the project is reopened.")
+                if model.isRedaction(first), !first.isOpaqueCover {
+                    Text("This shape isn't fully opaque, so what's under it stays visible.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if !model.isRedaction(first), first.isOpaqueCover {
+                    Text("The pixels under this shape are kept in saved projects.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }

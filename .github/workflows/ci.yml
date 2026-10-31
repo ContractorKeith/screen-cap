@@ -14,6 +14,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # bundle.sh sets CFBundleVersion from the commit count
       - name: Toolchain
         run: |
           xcode-select -p
@@ -27,3 +29,16 @@ jobs:
         run: |
           command -v swiftlint || brew install swiftlint
           swiftlint --strict --reporter github-actions-logging
+      # The ship path on every PR: release build, Sparkle embedding, signing, Info.plist check (#77, #80).
+      - name: Bundle
+        run: make bundle
+      - name: Check bundle
+        run: scripts/check-bundle.sh build/ScreenCap.app
+      - name: Launch smoke test
+        run: |
+          # Launches the bundled binary (dyld must find the embedded Sparkle) with a bad --capture value:
+          # it must exit 3 ("not started") on its own. Needs no Screen Recording permission.
+          status=0
+          perl -e 'alarm 60; exec @ARGV' build/ScreenCap.app/Contents/MacOS/ScreenCap --capture bogus --quit || status=$?
+          echo "exit status $status"
+          [ "$status" -eq 3 ]

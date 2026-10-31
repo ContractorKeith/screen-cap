@@ -12,7 +12,10 @@ final class CaptureCoordinator {
     var sink: CaptureSink
     let output: CaptureOutput
     let settings: AppSettings
+    /// Handed to features that grab the screen themselves (text, scrolling).
     let service: CaptureService
+    /// What the flows here capture with; `service` unless a test passes a fake.
+    let source: any CaptureSource
     let previousArea: PreviousArea
     let selfTimer = SelfTimer()
     /// Covers desktop icons during captures when "Hide desktop icons while capturing" is on.
@@ -22,9 +25,19 @@ final class CaptureCoordinator {
     var scrollingHandler: (@MainActor (CGRect, FilenameTemplate.Context, AfterCaptureAction?) async -> Void)?
     /// Region for the next scrolling capture, skipping the selection overlay (`--region`). Used once.
     var scrollingRegion: CGRect?
-    /// Runs OCR on a selected area's image (App/TextRecognition). Awaited, so `--quit` waits for it.
-    /// Nil posts `.captureTextRequested` with the rect instead.
-    var textHandler: (@MainActor (CGImage) async throws -> Void)?
+    /// Runs OCR on a selected area's image (App/TextRecognition) and returns the text for History.
+    /// Awaited, so `--quit` waits for it. The coordinator writes the `.text` History record itself
+    /// (#53, #72), so no handler can skip it. Nil posts `.captureTextRequested` with the rect instead.
+    var textHandler: (@MainActor (CGImage) async throws -> String?)?
+    /// Whether `.overlay` shows Quick Access; when off the coordinator saves instead (#75).
+    var showsQuickAccess: @MainActor () -> Bool = { QuickAccessPreferences.showAfterCapture }
+    /// Busy and save/copy failure HUDs; tests swap these out.
+    var alerts = CaptureAlerts()
+    /// URL-scheme captures waiting for the running one to finish, oldest first (#79).
+    private var pending: [Pending] = []
+    /// Most URL captures held while another runs; more get the busy HUD.
+    static let queueLimit = 5
+    let frontApps = FrontAppTracker()
     /// How the most recent capture request ended; set when it finishes or is refused.
     private(set) var lastOutcome: CaptureOutcome?
     /// Outcome of the capture running now, folded as images are delivered.
@@ -41,12 +54,14 @@ final class CaptureCoordinator {
     init(
         settings: AppSettings,
         service: CaptureService = CaptureService(),
+        source: (any CaptureSource)? = nil,
         history: HistoryStore?,
         hasPermission: @escaping () -> Bool = { ScreenRecordingPermission.isGranted },
         showOnboarding: @escaping () -> Void
     ) {
         self.settings = settings
         self.service = service
+        self.source = source ?? service
         self.history = history
         self.hasPermission = hasPermission
         self.showOnboarding = showOnboarding
@@ -56,33 +71,52 @@ final class CaptureCoordinator {
     }
 
     var isCapturing: Bool { current != nil }
+    /// No capture running and none queued.
+    var isIdle: Bool { current == nil && pending.isEmpty }
+    var queuedCount: Int { pending.count }
 
     /// Starts a capture. `action` overrides the per-shortcut after-capture setting.
+    /// `queueIfBusy` (URL scheme) waits for a running capture instead of being refused.
     ///
     /// Returns the running task (await it to know when the capture is fully delivered),
-    /// or nil if permission is missing or another capture is in progress.
+    /// or nil if permission is missing, the request was queued, or another capture is in progress.
     @discardableResult
-    func capture(_ kind: CaptureKind, action: AfterCaptureAction? = nil) -> Task<Void, Never>? {
-        start(kind.rawValue) { coordinator in try await coordinator.run(kind, action: action) }
+    func capture(_ kind: CaptureKind, action: AfterCaptureAction? = nil,
+                 queueIfBusy: Bool = false) -> Task<Void, Never>? {
+        let app = frontApps.app
+        return start(kind.rawValue, queueIfBusy: queueIfBusy) { coordinator in
+            try await coordinator.run(kind, action: action, app: app)
+        }
     }
 
     /// Captures a known rect in global AppKit points without the selection overlay
     /// (All-In-One opens with the rect pre-selected).
     @discardableResult
-    func capture(_ kind: CaptureKind, rect: CGRect, action: AfterCaptureAction? = nil) -> Task<Void, Never>? {
-        start("\(kind.rawValue) at \(rect)") { coordinator in
-            try await coordinator.run(kind, rect: rect, action: action)
+    func capture(_ kind: CaptureKind, rect: CGRect, action: AfterCaptureAction? = nil,
+                 queueIfBusy: Bool = false) -> Task<Void, Never>? {
+        let app = frontApps.app
+        return start("\(kind.rawValue) at \(rect)", queueIfBusy: queueIfBusy) { coordinator in
+            try await coordinator.run(kind, rect: rect, action: action, app: app)
         }
     }
 
     /// Captures an app's frontmost window without the picker. Used by `--capture window --window <app>`.
     @discardableResult
     func captureWindow(ofApp app: String, action: AfterCaptureAction? = nil) -> Task<Void, Never>? {
-        start("window of \(app)") { coordinator in try await coordinator.runWindow(ofApp: app, action: action) }
+        let front = frontApps.app
+        return start("window of \(app)") { coordinator in
+            try await coordinator.runWindow(ofApp: app, action: action, front: front)
+        }
     }
 
-    /// Permission check, one capture at a time, error logging and the failure HUD.
-    private func start(_ label: String, _ body: @escaping @MainActor (CaptureCoordinator) async throws -> Void)
+    private struct Pending {
+        let label: String
+        let body: @MainActor (CaptureCoordinator) async throws -> Void
+    }
+
+    /// Permission check, one capture at a time (URL captures queue), error logging and the failure HUD.
+    private func start(_ label: String, queueIfBusy: Bool = false,
+                       _ body: @escaping @MainActor (CaptureCoordinator) async throws -> Void)
         -> Task<Void, Never>? {
         guard hasPermission() else {
             appLog.notice("Screen Recording not granted; showing onboarding")
@@ -91,8 +125,13 @@ final class CaptureCoordinator {
             return nil
         }
         guard current == nil else {
+            if queueIfBusy, pending.count < Self.queueLimit {
+                pending.append(Pending(label: label, body: body))
+                appLog.notice("Capture \(label, privacy: .public) queued behind the running capture")
+                return nil
+            }
             appLog.notice("Capture \(label, privacy: .public) ignored: another capture is in progress")
-            CaptureFailureHUD.showBusy()
+            alerts.busy()
             return nil
         }
         runningOutcome = .cancelled
@@ -112,9 +151,18 @@ final class CaptureCoordinator {
             if coverIcons { desktopIcons?.endTemporaryHide() }
             lastOutcome = runningOutcome
             self.current = nil
+            startNextPending()
         }
         current = task
         return task
+    }
+
+    /// Runs queued URL captures in arrival order once nothing else is running.
+    private func startNextPending() {
+        while current == nil, !pending.isEmpty {
+            let next = pending.removeFirst()
+            _ = start(next.label, next.body)
+        }
     }
 
     /// Folds an event into the running capture's outcome.
@@ -141,7 +189,9 @@ final class CaptureCoordinator {
         let record = await addToHistory(result)
         result.historyRecordID = record?.id
         result.historyFileURL = record?.fileURL
-        let action = action ?? settings.afterCaptureAction(for: kind.shortcut)
+        var action = action ?? settings.afterCaptureAction(for: kind.shortcut)
+        // Quick Access off: save here, so a failure gets the HUD and a failed outcome (#75).
+        if action == .overlay, !showsQuickAccess() { action = .save }
         let size = "\(image.cgImage.width)x\(image.cgImage.height)"
         let summary = "\(kind.rawValue) \(size) px, \(action.rawValue)"
         appLog.notice("Captured \(summary, privacy: .public)")
@@ -161,7 +211,7 @@ final class CaptureCoordinator {
             let reason = error.localizedDescription
             appLog.error("After-capture \(action.rawValue, privacy: .public) failed: \(reason, privacy: .public)")
             self.record(.failed(reason))
-            CaptureFailureHUD.showOutputFailed(action, error: error, result: result, output: output)
+            alerts.outputFailed(action, error, result, output)
         }
     }
 
@@ -181,10 +231,19 @@ final class CaptureCoordinator {
     }
 
     /// Front app name and its frontmost window title, for `{app}` and `{window}`.
-    func frontContext(windows: [ShareableWindow]) -> FilenameTemplate.Context {
-        let app = NSWorkspace.shared.frontmostApplication
-        let title = windows.first { $0.processID == app?.processIdentifier && $0.layer == 0 }?.title
-        return FilenameTemplate.Context(app: app?.localizedName, window: title)
+    /// `app` is taken when the request arrived, so a queued or URL capture names the right app.
+    func frontContext(windows: [ShareableWindow], app: FrontApp?) -> FilenameTemplate.Context {
+        let title = windows.first { $0.processID == app?.processID && $0.layer == 0 }?.title
+        return FilenameTemplate.Context(app: app?.name, window: title)
+    }
+}
+
+/// The HUDs the coordinator shows; replaceable so tests run without panels.
+@MainActor
+struct CaptureAlerts {
+    var busy: @MainActor () -> Void = { CaptureFailureHUD.showBusy() }
+    var outputFailed: @MainActor (AfterCaptureAction, Error, CaptureResult, CaptureOutput) -> Void = {
+        CaptureFailureHUD.showOutputFailed($0, error: $1, result: $2, output: $3)
     }
 }
 

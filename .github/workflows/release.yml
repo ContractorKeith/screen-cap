@@ -14,6 +14,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # bundle.sh sets CFBundleVersion from the commit count
 
       - name: Check tag matches version
         run: |
