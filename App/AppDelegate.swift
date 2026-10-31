@@ -52,8 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingURLs = nil
         appLog.notice("ScreenCap launched, status item visible: \(self.menuBar?.isVisible ?? false)")
 
-        if let kind = launch.capture {
-            runLaunchCapture(kind)
+        if launch.requestsCapture {
+            coordinator.runLaunchCapture(launch)
         } else if onboarding.shouldShowAtLaunch {
             onboarding.show()
         }
@@ -104,21 +104,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// `--capture <kind>`: same path as the shortcut; `--quit` exits when it is delivered.
-    private func runLaunchCapture(_ kind: CaptureKind) {
-        appLog.notice("Launch capture: \(kind.rawValue, privacy: .public)")
-        let task = if kind == .window, let app = launch.windowApp {
-            coordinator.captureWindow(ofApp: app, action: launch.action)
-        } else {
-            coordinator.capture(kind, action: launch.action)
-        }
-        guard launch.quitAfterCapture else { return }
-        Task {
-            await task?.value
-            NSApp.terminate(nil)
-        }
-    }
-
     // MARK: - Feature hooks
 
     /// Each UI feature creates its controller here and assigns itself on `sinkRouter`
@@ -131,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ScrollingCaptureController.install(on: coordinator)
         sinkRouter.pin = pins
         textCapture.install()
+        coordinator.textHandler = { [textCapture] image in try await textCapture.recognize(image) }
         sinkRouter.overlay = QuickAccessController(settings: settings, output: coordinator.output,
                                                    history: coordinator.history, router: sinkRouter)
     }

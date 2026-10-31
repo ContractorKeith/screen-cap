@@ -6,19 +6,48 @@ enum SelectionMath {
     /// Smallest drag that counts as a selection, in points; anything less is a click.
     static let minimumSize: CGFloat = 4
 
+    /// Smallest side, in points, a selection needs before ⇧ locks its own aspect ratio.
+    static let minimumAspectSide: CGFloat = 8
+
     /// The rect between a drag's start and current point, snapped to whole points.
     ///
     /// With `aspect` (width ÷ height), the rect keeps that ratio, anchored at `start`
     /// and growing toward `end` along whichever axis was dragged further.
-    static func rect(from start: CGPoint, to end: CGPoint, aspect: CGFloat? = nil) -> CGRect {
+    /// With `bounds` (the display union), the rect stops at its edges, shrinking both sides
+    /// together when an aspect is locked.
+    static func rect(from start: CGPoint, to end: CGPoint, aspect: CGFloat? = nil, within bounds: CGRect? = nil)
+        -> CGRect {
         var width = abs(end.x - start.x)
         var height = abs(end.y - start.y)
         if let aspect, aspect > 0 {
             if width / aspect > height { height = width / aspect } else { width = height * aspect }
         }
+        if let bounds, !bounds.isNull {
+            let roomX = max(end.x >= start.x ? bounds.maxX - start.x : start.x - bounds.minX, 0)
+            let roomY = max(end.y >= start.y ? bounds.maxY - start.y : start.y - bounds.minY, 0)
+            if let aspect, aspect > 0 {
+                let fit = min(1, width > 0 ? roomX / width : 1, height > 0 ? roomY / height : 1)
+                width *= fit
+                height *= fit
+            } else {
+                width = min(width, roomX)
+                height = min(height, roomY)
+            }
+        }
         let x = end.x >= start.x ? start.x : start.x - width
         let y = end.y >= start.y ? start.y : start.y - height
         return snapped(CGRect(x: x, y: y, width: width, height: height))
+    }
+
+    /// The ratio ⇧ locks: the current selection's if both sides are at least `minimumAspectSide`,
+    /// else the last known selection's (same rule), else 1:1.
+    static func lockedAspect(current: CGRect?, fallback: CGRect?) -> CGFloat {
+        for rect in [current, fallback] {
+            if let rect, rect.width >= minimumAspectSide, rect.height >= minimumAspectSide {
+                return rect.width / rect.height
+            }
+        }
+        return 1
     }
 
     /// A rect of `size` centered on `point`, kept inside `bounds` when it fits.

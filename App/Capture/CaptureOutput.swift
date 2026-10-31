@@ -2,22 +2,36 @@ import AppKit
 import ScreenCapKit
 
 /// Saves and copies captures using the current settings. Encoding runs off the main actor.
+///
+/// The output scale (Retina 2x / 1x) applies here only: files and the clipboard. History, the
+/// editor, Quick Access and pins keep the full-resolution capture.
 @MainActor
 final class CaptureOutput {
     private let settings: AppSettings
+    /// Saves run one at a time, in the order they were asked for.
+    private var lastSave: Task<Void, Never>?
 
     init(settings: AppSettings) {
         self.settings = settings
     }
 
+    /// Where `save` writes, for messages.
+    var saveFolder: URL { settings.saveOptions.folder }
+
     /// Writes the capture into the save folder with the filename template; returns the file URL.
+    ///
+    /// The name is claimed with an exclusive create before encoding, and saves are serialized,
+    /// so two saves in the same second get two files.
     func save(_ result: CaptureResult) async throws -> URL {
-        let options = settings.saveOptions
-        try FileManager.default.createDirectory(at: options.folder, withIntermediateDirectories: true)
-        let url = options.template().uniqueURL(in: options.folder, context: result.context)
-        let data = try await Self.encode(result.image, as: ExportFormat(options.format, quality: options.jpegQuality))
-        try data.write(to: url, options: .atomic)
-        return url
+        let previous = lastSave
+        let task = Task { @MainActor [settings] in
+            await previous?.value
+            let options = settings.saveOptions
+            try FileManager.default.createDirectory(at: options.folder, withIntermediateDirectories: true)
+            return try await Self.write(result, options: options, in: options.folder)
+        }
+        lastSave = Task { _ = await task.result }
+        return try await task.value
     }
 
     /// Puts the capture on the pasteboard as PNG data, or as a file per `CopyMode`.
@@ -25,7 +39,8 @@ final class CaptureOutput {
         let pasteboard = NSPasteboard.general
         switch settings.copyMode {
         case .image:
-            let data = try await Self.encode(result.image, as: .png)
+            let image = try OutputScaler.scaled(result.image, to: settings.retinaScale)
+            let data = try await Self.encode(image, as: .png)
             pasteboard.clearContents()
             pasteboard.setData(data, forType: .png)
         case .file:
@@ -40,10 +55,22 @@ final class CaptureOutput {
         let options = settings.saveOptions
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenCap", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = options.template().uniqueURL(in: folder, context: result.context)
-        let data = try await Self.encode(result.image, as: ExportFormat(options.format, quality: options.jpegQuality))
-        try data.write(to: url, options: .atomic)
-        return url
+        return try await Self.write(result, options: options, in: folder)
+    }
+
+    /// Reserves a name, scales, encodes and writes over the placeholder; removes it on failure.
+    private static func write(_ result: CaptureResult, options: SaveOptions, in folder: URL)
+        async throws -> URL {
+        let url = try options.template().reserveUniqueURL(in: folder, context: result.context)
+        do {
+            let image = try OutputScaler.scaled(result.image, to: options.scale)
+            let data = try await encode(image, as: ExportFormat(options.format, quality: options.jpegQuality))
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
     }
 
     private static func encode(_ image: CapturedImage, as format: ExportFormat) async throws -> Data {
@@ -55,20 +82,25 @@ final class CaptureOutput {
 
 /// Output-scale conversion: 2x keeps Retina pixels, 1x downsamples to one pixel per point.
 enum OutputScaler {
+    struct ScalingFailed: LocalizedError {
+        var errorDescription: String? { "Couldn't scale the image to 1x." }
+    }
+
     /// Returns `image` at no more than `scale` pixels per point. Never upsamples.
-    static func scaled(_ image: CapturedImage, to scale: RetinaScale) -> CapturedImage {
+    /// Throws rather than silently keeping the full-size image.
+    static func scaled(_ image: CapturedImage, to scale: RetinaScale) throws -> CapturedImage {
         let target = scale.factor
         guard image.scale > target else { return image }
         let width = max(Int((CGFloat(image.cgImage.width) * target / image.scale).rounded()), 1)
         let height = max(Int((CGFloat(image.cgImage.height) * target / image.scale).rounded()), 1)
-        let space = image.cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let context = CGContext(
-            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-            space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return image }
+        guard let space = image.cgImage.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                  space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { throw ScalingFailed() }
         context.interpolationQuality = .high
         context.draw(image.cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        guard let scaled = context.makeImage() else { return image }
+        guard let scaled = context.makeImage() else { throw ScalingFailed() }
         return CapturedImage(cgImage: scaled, scale: target, pointRect: image.pointRect, displayID: image.displayID)
     }
 }

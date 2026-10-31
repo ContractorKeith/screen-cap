@@ -17,12 +17,6 @@ extension CaptureCoordinator {
             } else {
                 try await select(flow, windows: windows)
             }
-        case .selfTimer:
-            if let rect = previousArea.rect(validIn: geometry) {
-                try await timedArea(rect, flow)
-            } else {
-                try await select(flow, windows: windows)
-            }
         case .scrolling:
             if let rect = scrollingRegion {
                 scrollingRegion = nil
@@ -30,7 +24,8 @@ extension CaptureCoordinator {
             } else {
                 try await select(flow, windows: windows)
             }
-        case .area, .window, .allInOne, .text:
+        case .area, .window, .allInOne, .text, .selfTimer:
+            // Self-timer: pick the area (or window) first, then count down, then capture live (PLAN §3.1).
             try await select(flow, windows: windows)
         }
     }
@@ -48,7 +43,7 @@ extension CaptureCoordinator {
         case .scrolling:
             post(.scrollingCaptureRequested, rect: rect)
         case .text:
-            post(.captureTextRequested, rect: rect)
+            try await recognizeText(rect, stills: [], flow)
         case .area, .previousArea, .window, .fullscreen:
             previousArea.remember(rect)
             await deliver(try await service.captureArea(pointRect: rect), flow)
@@ -62,11 +57,16 @@ extension CaptureCoordinator {
         }
         guard let window = match else {
             appLog.error("No capturable window for \(app, privacy: .public)")
-            return
+            throw WindowNotFound(app: app)
         }
         let flow = Flow(kind: .window, geometry: DisplayGeometry.fromCurrentScreens(),
                         context: frontContext(windows: windows), action: action)
         try await captureWindow(window, flow)
+    }
+
+    struct WindowNotFound: LocalizedError {
+        let app: String
+        var errorDescription: String? { "No capturable window for \(app)." }
     }
 
     /// Per-capture values handed between the steps of a flow.
@@ -85,9 +85,11 @@ extension CaptureCoordinator {
     // MARK: - Selection overlay
 
     private func select(_ flow: Flow, windows: [ShareableWindow], preselected: CGRect? = nil) async throws {
-        let stills = try await service.captureAllDisplays()
+        // Frozen stills only when they're shown and used: live mode and the self-timer capture after.
+        let freezes = settings.freezeScreen && flow.kind != .selfTimer
+        let stills = freezes ? try await service.captureAllDisplays() : []
         let options = SelectionOptions(
-            showsStill: settings.freezeScreen,
+            showsStill: freezes,
             showsCrosshair: settings.showCrosshair,
             showsMagnifier: settings.showMagnifier,
             allInOne: flow.kind == .allInOne,
@@ -101,10 +103,10 @@ extension CaptureCoordinator {
         case let .window(window):
             try await captureWindow(window, flow)
         case let .area(rect):
-            previousArea.remember(rect)
+            if flow.kind.remembersArea { previousArea.remember(rect) }
             try await captureSelectedArea(rect, stills: stills, flow)
         case let .allInOne(choice, rect):
-            previousArea.remember(rect)
+            if choice.remembersArea { previousArea.remember(rect) }
             try await runAllInOne(choice, rect: rect, stills: stills, flow)
         }
     }
@@ -123,7 +125,7 @@ extension CaptureCoordinator {
         case .scrolling:
             await scroll(rect, flow)
         case .text:
-            post(.captureTextRequested, rect: rect)
+            try await recognizeText(rect, stills: stills, flow)
         case .selfTimer:
             try await timedArea(rect, flow)
         case .area, .window, .fullscreen, .previousArea, .allInOne:
@@ -147,26 +149,32 @@ extension CaptureCoordinator {
         case .scrolling:
             await scroll(rect, flow)
         case .text:
-            post(.captureTextRequested, rect: rect)
+            try await recognizeText(rect, stills: stills, flow)
         case .timer:
             try await timedArea(rect, flow)
         }
     }
 
-    /// Frozen mode crops the still taken at shortcut time; live mode re-captures after the overlay hides.
+    /// Frozen mode cuts the stills taken at shortcut time (composited across displays); live mode
+    /// re-captures after the overlay hides.
     private func areaImage(_ rect: CGRect, stills: [CapturedImage], geometry: DisplayGeometry) async throws
         -> CapturedImage {
-        if settings.freezeScreen,
-           let display = geometry.display(bestFor: rect),
-           let still = stills.first(where: { $0.displayID == display.id }),
-           let cropped = still.cropped(toGlobalPoints: rect) {
-            return cropped
+        if !stills.isEmpty, let image = AreaCompositor.image(of: rect, geometry: geometry, stills: stills) {
+            return image
         }
         try await Task.sleep(for: Self.overlayHideDelay)
         return try await service.captureArea(pointRect: rect)
     }
 
     // MARK: - Other flows
+
+    /// OCR of a selected area, awaited so `--quit` waits for it. Without a handler, posts the rect.
+    private func recognizeText(_ rect: CGRect, stills: [CapturedImage], _ flow: Flow) async throws {
+        guard let textHandler else { return post(.captureTextRequested, rect: rect) }
+        let image = try await areaImage(rect, stills: stills, geometry: flow.geometry)
+        try await textHandler(image.cgImage)
+        record(.delivered)
+    }
 
     private func timedArea(_ rect: CGRect, _ flow: Flow) async throws {
         guard await selfTimer.countdown(seconds: settings.selfTimerSeconds, around: rect) else {

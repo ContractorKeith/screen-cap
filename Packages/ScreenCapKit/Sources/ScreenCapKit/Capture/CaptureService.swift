@@ -70,20 +70,22 @@ public actor CaptureService {
         }
     }
 
-    /// Captures a global point rect by grabbing the display under most of it and cropping.
+    /// Captures a global point rect by grabbing every display it touches and compositing them.
     ///
-    /// A rect spanning displays is clipped to the display holding its largest part.
-    /// For frozen-screen selection, crop an existing still with `CapturedImage.cropped(toGlobalPoints:)`.
+    /// A rect spanning displays comes back whole, at the highest backing scale it touches.
+    /// For frozen-screen selection, composite existing stills with `AreaCompositor.image(of:geometry:stills:)`.
     public func captureArea(pointRect: CGRect) async throws -> CapturedImage {
         let geometry = await geometryProvider()
-        guard let display = geometry.display(bestFor: pointRect) else {
+        let slices = geometry.slices(forGlobalPoints: pointRect)
+        guard !slices.isEmpty else { throw CaptureError.areaOffScreen(pointRect) }
+        var stills: [CapturedImage] = []
+        for slice in slices {
+            stills.append(try await captureDisplay(slice.display.id))
+        }
+        guard let image = AreaCompositor.image(of: pointRect, geometry: geometry, stills: stills) else {
             throw CaptureError.areaOffScreen(pointRect)
         }
-        let still = try await captureDisplay(display.id)
-        guard let cropped = still.cropped(toGlobalPoints: pointRect) else {
-            throw CaptureError.areaOffScreen(pointRect)
-        }
-        return cropped
+        return image
     }
 
     /// Captures one window on its own, so overlapping windows don't show through.

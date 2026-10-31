@@ -122,4 +122,34 @@ struct FilenameTemplateTests {
         try Data().write(to: folder.appendingPathComponent("Shot.png"))
         #expect(template.uniqueURL(in: folder).lastPathComponent == "Shot 2.png")
     }
+
+    @Test func reserveClaimsDistinctNamesUnderConcurrency() async throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let template = make(AppSettings.Defaults.filenameTemplate)
+        let urls = try await withThrowingTaskGroup(of: URL.self) { group in
+            for _ in 0..<8 {
+                group.addTask { try template.reserveUniqueURL(in: folder) }
+            }
+            return try await group.reduce(into: [URL]()) { $0.append($1) }
+        }
+        #expect(Set(urls).count == 8)
+        let names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        #expect(names.count == 8)
+        #expect(names.contains("ScreenCap 2026-03-07 at 09.05.04.png"))
+        #expect(names.contains("ScreenCap 2026-03-07 at 09.05.04 2.png"))
+    }
+
+    @Test func reserveSkipsExistingFiles() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Data("keep".utf8).write(to: folder.appendingPathComponent("Shot.png"))
+        let url = try make("Shot").reserveUniqueURL(in: folder)
+        #expect(url.lastPathComponent == "Shot 2.png")
+        #expect(try Data(contentsOf: folder.appendingPathComponent("Shot.png")) == Data("keep".utf8))
+    }
 }
