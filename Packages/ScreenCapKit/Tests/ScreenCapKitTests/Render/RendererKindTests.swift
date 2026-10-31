@@ -153,13 +153,13 @@ struct RendererKindTests {
         #expect(pixels.inkCount(in: CGRect(x: 0, y: 0, width: 50, height: 50)) == 0)
     }
 
-    @Test func redactionKindsAreNoOpsByDefault() throws {
+    @Test func noOpRedactionHookDrawsNothing() throws {
         let rect = CGRect(x: 20, y: 20, width: 100, height: 100)
         let pixels = try Fix.render([
             Fix.annotation(.blur(rect: rect, mode: .secure, radius: 10)),
             Fix.annotation(.pixelate(rect: rect, blockSize: 8, randomize: true)),
             Fix.annotation(.spotlight(shapes: [.rect(rect: rect)]))
-        ])
+        ], renderer: Renderer(redaction: NoOpRedactionRenderer()))
         #expect(pixels.inkCount(in: CGRect(x: 0, y: 0, width: 200, height: 200)) == 0)
     }
 }

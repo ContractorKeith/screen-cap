@@ -30,10 +30,8 @@ public protocol RedactionRenderer: Sendable {
     func apply(_ kind: Annotation.Kind, to canvas: CGImage, scale: Double) -> CGImage?
 }
 
-// swiftlint:disable:next todo
-// TODO(#17): replace with an Effects-backed renderer calling Redaction.pixelate/blur and
-// Spotlight.apply once the Effects area lands on main.
-/// Default hook: draws nothing for blur, pixelate and spotlight.
+/// Stub hook that leaves blur, pixelate and spotlight undrawn. Tests use it to isolate vector
+/// drawing; the renderer's default is `EffectsRedactionRenderer`.
 public struct NoOpRedactionRenderer: RedactionRenderer {
     public init() {}
 

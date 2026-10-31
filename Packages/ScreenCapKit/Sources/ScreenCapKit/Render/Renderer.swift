@@ -7,10 +7,10 @@ import Foundation
 /// Model geometry is in image pixels with a top-left origin; the renderer sets up the flip
 /// and scale itself, so callers hand it an unflipped context.
 public struct Renderer: Sendable {
-    /// Pixel effects hook for blur, pixelate and spotlight.
+    /// Pixel effects hook for blur, pixelate and spotlight. Defaults to the Effects-backed renderer.
     public var redaction: any RedactionRenderer
 
-    public init(redaction: any RedactionRenderer = NoOpRedactionRenderer()) {
+    public init(redaction: any RedactionRenderer = EffectsRedactionRenderer()) {
         self.redaction = redaction
     }
 

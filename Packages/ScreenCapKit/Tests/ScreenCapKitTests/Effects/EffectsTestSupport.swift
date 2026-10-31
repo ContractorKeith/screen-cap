@@ -8,7 +8,7 @@ import Vision
 enum EffectsFixtures {
     /// A bitmap of the given size filled with `color`; `draw` runs in CG (bottom-left) space.
     static func image(
-        width: Int, height: Int, fill color: EffectsColor?, draw: (CGContext) -> Void = { _ in }
+        width: Int, height: Int, fill color: RGBAColor?, draw: (CGContext) -> Void = { _ in }
     ) throws -> CGImage {
         let bitmap = try EffectsBitmap(width: width, height: height)
         if let color {
@@ -27,7 +27,7 @@ enum EffectsFixtures {
             let font = CTFontCreateWithName("Helvetica" as CFString, fontSize, nil)
             let attributes: [NSAttributedString.Key: Any] = [
                 NSAttributedString.Key(kCTFontAttributeName as String): font,
-                NSAttributedString.Key(kCTForegroundColorAttributeName as String): EffectsColor.black.cgColor
+                NSAttributedString.Key(kCTForegroundColorAttributeName as String): RGBAColor.black.cgColor
             ]
             let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes))
             context.textPosition = CGPoint(x: 20, y: 35)
