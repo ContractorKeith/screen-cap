@@ -107,9 +107,11 @@ struct PermissionOnboardingView: View {
                 ForEach(WelcomePolicy.mainShortcuts, id: \.name.rawValue) { entry in
                     GridRow {
                         Text(entry.title)
-                        Text(KeyboardShortcuts.getShortcut(for: entry.name)?.description ?? "Not set")
+                        let shortcut = KeyboardShortcuts.getShortcut(for: entry.name)?.description ?? "Not set"
+                        Text(shortcut)
                             .font(.body.monospaced())
                             .foregroundStyle(.secondary)
+                            .accessibilityLabel(A11y.spokenShortcut(shortcut))
                     }
                 }
             }
@@ -153,8 +155,11 @@ final class PermissionOnboardingController: NSObject, NSWindowDelegate {
             newWindow.styleMask = [.titled, .closable]
             newWindow.isReleasedWhenClosed = false
             newWindow.delegate = self
-            newWindow.center()
+            // Sized to its content before centering, so it opens centered and on screen (#115).
+            WindowPlacement.placeNew(newWindow, autosaveName: "ScreenCapWelcomeWindow")
             window = newWindow
+        } else if let window {
+            WindowPlacement.clampOnScreen(window)
         }
         model.startPolling()
         NSApp.activate(ignoringOtherApps: true)

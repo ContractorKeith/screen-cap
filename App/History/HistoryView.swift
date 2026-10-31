@@ -46,6 +46,11 @@ struct HistoryView: View {
                                                                           toggling: toggling)
                             }
                             .contextMenu { contextMenu(for: record) }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityLabel(HistoryCell.label(for: record))
+                            .accessibilityValue(model.selection.contains(record.id) ? A11y.selected : "")
+                            .accessibilityHint("Double-click to open in the editor")
                     }
                 }
                 .padding(14)
@@ -89,6 +94,7 @@ struct HistoryView: View {
             }
             .pickerStyle(.menu)
             .frame(width: 130)
+            .accessibilityLabel(A11y.historyKindFilter)
         }
         ToolbarItemGroup(placement: .primaryAction) {
             let selected = model.selectedRecords
@@ -175,6 +181,11 @@ private struct HistoryCell: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(isSelected ? Color.accentColor.opacity(0.25) : .clear))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(isSelected ? Color.accentColor : .clear, lineWidth: 2))
         .contentShape(Rectangle())
+    }
+
+    static func label(for record: CaptureRecord) -> String {
+        A11y.historyThumbnail(kind: HistoryViewModel.title(for: record.kind), date: record.createdAt,
+                              source: record.appName ?? record.windowTitle, closed: record.closedAt != nil)
     }
 
     @ViewBuilder private var thumbnail: some View {

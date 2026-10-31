@@ -18,13 +18,18 @@ final class QuickAccessController: CaptureSink {
     private var ticker: Timer?
     /// Coalesces concurrent saves of one capture (+Commands).
     let saveGate = QuickAccessSaveGate<QuickAccessSaveKey>()
+    /// Drag-out copies; each panel's are removed when it goes (#114).
+    let temp: TempFiles
+    /// "+N" for panels past the cap (#116); made on first use.
+    private var badge: QuickAccessBadge?
 
-    init(settings: AppSettings, output: CaptureOutput, history: HistoryStore?, router: CaptureSinkRouter?) {
+    init(settings: AppSettings, output: CaptureOutput, history: HistoryStore?, router: CaptureSinkRouter?,
+         temp: TempFiles? = nil) {
         self.settings = settings
         self.output = output
         self.history = history
         self.router = router
-        try? FileManager.default.removeItem(at: QuickAccessItem.temporaryFolder)
+        self.temp = temp ?? .shared
         observe(.toggleOverlaysRequested) { $0.toggleHidden() }
         observe(.restoreRecentlyClosedRequested) { $0.restoreRecentlyClosed() }
         observe(NSApplication.didChangeScreenParametersNotification) { $0.layout() }
@@ -46,18 +51,36 @@ final class QuickAccessController: CaptureSink {
         let options = settings.quickAccess
         let size = QuickAccessLayout.panelSize(imageSize: result.image.pixelSize, size: options.size)
         let panel = QuickAccessPanel(image: result.image.cgImage, size: size)
-        let item = QuickAccessItem(result: result, panel: panel,
-                                   timer: AutoCloseTimer(seconds: options.autoCloseSeconds, now: Date()))
+        // A capture History couldn't store never closes on its own (#113).
+        let seconds = result.historyWriteFailed ? nil : options.autoCloseSeconds
+        let item = QuickAccessItem(result: result, panel: panel, timer: AutoCloseTimer(seconds: seconds, now: Date()))
         wire(item)
         item.refreshInfo()
         items.insert(item, at: 0)
         screen = targetScreen()
         layout(entering: item)
         startTicker()
+        prepareDrag(for: item)
+    }
+
+    /// Writes the drag-out copy in the background and tracks it under the panel. A panel that
+    /// closed meanwhile (task cancelled) has its copy removed at once (#114).
+    private func prepareDrag(for item: QuickAccessItem) {
         let saveOptions = settings.saveOptions
-        item.prepareTask = Task { [weak item] in
-            let contents = await QuickAccessItem.prepareDrag(for: result, options: saveOptions)
-            item?.drag = contents
+        let result = item.result
+        let owner = item.tempOwner
+        item.prepareTask = Task { [weak item, temp] in
+            let contents = await QuickAccessItem.prepareDrag(for: result, options: saveOptions, in: temp.launchFolder)
+            guard let folder = contents.fileURL?.deletingLastPathComponent() else {
+                item?.drag = contents
+                return
+            }
+            guard !Task.isCancelled, let item else {
+                try? FileManager.default.removeItem(at: folder)
+                return
+            }
+            temp.track(folder, owner: owner, record: result.historyRecordID)
+            item.drag = contents
         }
     }
 
@@ -69,6 +92,7 @@ final class QuickAccessController: CaptureSink {
         guard let index = items.firstIndex(where: { $0 === item }) else { return }
         items.remove(at: index)
         item.prepareTask?.cancel()
+        temp.release(item.tempOwner)
         let panel = item.panel
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.18
@@ -87,14 +111,33 @@ final class QuickAccessController: CaptureSink {
 
     // MARK: - Layout
 
-    /// Puts every panel at its stack position; `entering` slides in from the edge.
+    /// Puts the newest panels (up to the cap) at their stack positions, inside the screen's
+    /// visible frame; older ones wait behind the "+N" badge (#116). `entering` slides in.
     func layout(entering: QuickAccessItem? = nil) {
         if let current = screen, !NSScreen.screens.contains(current) { screen = targetScreen() }
         guard let visible = (screen ?? targetScreen())?.visibleFrame else { return }
         let corner = settings.quickAccess.position
-        let frames = QuickAccessLayout.frames(for: items.map(\.panel.frame.size), corner: corner, in: visible)
-        for (item, frame) in zip(items, frames) {
+        let stack = QuickAccessLayout.stack(for: items.map(\.panel.frame.size), corner: corner, in: visible)
+        let now = Date()
+        for item in items.dropFirst(stack.frames.count) where !item.isOverflowed {
+            item.isOverflowed = true
+            item.isHovered = false
+            item.timer.pause(at: now)
+            item.panel.orderOut(nil)
+        }
+        updateBadge(stack)
+        for (item, frame) in zip(items, stack.frames) {
+            let returning = item.isOverflowed
+            if returning {
+                item.isOverflowed = false
+                if !QuickAccessVisibility.isHidden { item.timer.resume(at: now) }
+            }
             item.baseFrame = frame
+            if returning, item !== entering {
+                item.panel.setFrame(frame, display: false)
+                item.panel.alphaValue = 0
+                if !QuickAccessVisibility.isHidden { item.panel.orderFrontRegardless() }
+            }
             if item === entering {
                 item.panel.setFrame(QuickAccessLayout.entryFrame(for: frame, corner: corner), display: false)
                 item.panel.alphaValue = 0
@@ -107,6 +150,18 @@ final class QuickAccessController: CaptureSink {
                 item.panel.animator().alphaValue = 1
             }
         }
+    }
+
+    private func updateBadge(_ stack: QuickAccessLayout.Stack) {
+        guard let frame = stack.badgeFrame else {
+            badge?.orderOut(nil)
+            return
+        }
+        let badge = badge ?? QuickAccessBadge()
+        self.badge = badge
+        badge.setCount(stack.hiddenCount)
+        badge.setFrame(frame, display: true)
+        if !QuickAccessVisibility.isHidden { badge.orderFrontRegardless() }
     }
 
     private func targetScreen() -> NSScreen? {
@@ -127,7 +182,7 @@ final class QuickAccessController: CaptureSink {
     func setHidden(_ hidden: Bool) {
         QuickAccessVisibility.isHidden = hidden
         let now = Date()
-        for item in items {
+        for item in items where !item.isOverflowed {
             if hidden {
                 item.isHovered = false
                 item.timer.pause(at: now)
@@ -136,6 +191,11 @@ final class QuickAccessController: CaptureSink {
                 item.timer.resume(at: now)
                 item.panel.orderFrontRegardless()
             }
+        }
+        if hidden {
+            badge?.orderOut(nil)
+        } else if items.contains(where: \.isOverflowed) {
+            badge?.orderFrontRegardless()
         }
     }
 
@@ -185,7 +245,7 @@ final class QuickAccessController: CaptureSink {
 
     private func tick() {
         let now = Date()
-        for item in items where item.timer.isExpired(at: now) {
+        for item in items where item.timer.isExpired(at: now) && !item.isOnlyCopy {
             remove(item, markClosed: true)
         }
     }

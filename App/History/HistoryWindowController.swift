@@ -47,6 +47,14 @@ final class HistoryWindowController {
         Task { await model.reload() }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async { [weak self] in self?.labelSearchField() }
+    }
+
+    /// `.searchable` gives the field only a placeholder; VoiceOver needs a label (#117).
+    private func labelSearchField() {
+        for case let item as NSSearchToolbarItem in window?.toolbar?.items ?? [] {
+            item.searchField.setAccessibilityLabel(A11y.historySearch)
+        }
     }
 }
 

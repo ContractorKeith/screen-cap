@@ -6,6 +6,19 @@ import ImageIO
 public enum HistoryError: Error, Equatable {
     case recordNotFound(UUID)
     case thumbnailFailed
+    /// The History folder exists but this user can't write to it.
+    case folderNotWritable(String)
+}
+
+extension HistoryError: LocalizedError {
+    /// Says what failed, for the "History isn't being saved" HUD (#113).
+    public var errorDescription: String? {
+        switch self {
+        case .recordNotFound: "The capture isn't in History any more."
+        case .thumbnailFailed: "Couldn't make the History thumbnail."
+        case let .folderNotWritable(path): "The History folder can't be written to (\(path))."
+        }
+    }
 }
 
 /// On-disk capture history (PLAN §3.4): `<id>.png`, `<id>-thumb.png` and an `index.json`
@@ -57,6 +70,9 @@ public actor HistoryStore {
     @discardableResult
     public func add(image: CGImage, kind: CaptureKind, metadata: CaptureMetadata = CaptureMetadata()) throws
         -> CaptureRecord {
+        guard FileManager.default.isWritableFile(atPath: directory.path) else {
+            throw HistoryError.folderNotWritable((directory.path as NSString).abbreviatingWithTildeInPath)
+        }
         let id = UUID()
         let fileURL = Self.imageURL(id, in: directory)
         let thumbURL = Self.thumbnailURL(id, in: directory)

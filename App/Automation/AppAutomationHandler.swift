@@ -68,16 +68,18 @@ final class AppAutomationHandler: AutomationHandling {
 }
 
 /// Reads an image from a pasteboard into a temporary PNG file.
+@MainActor
 enum ClipboardImage {
     static func writeTemporaryPNG(from pasteboard: NSPasteboard) -> URL? {
         guard let image = NSImage(pasteboard: pasteboard),
               let tiff = image.tiffRepresentation,
               let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
         else { return nil }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenCap", isDirectory: true)
-        let url = folder.appendingPathComponent("Clipboard \(UUID().uuidString.prefix(8)).png")
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            // Removed at quit (#114); the editor may still be reading it until then.
+            let folder = try TempFiles.shared.makeFolder()
+            TempFiles.shared.track(folder, owner: .token(UUID()))
+            let url = folder.appendingPathComponent("Clipboard \(UUID().uuidString.prefix(8)).png")
             try png.write(to: url, options: .atomic)
             return url
         } catch {

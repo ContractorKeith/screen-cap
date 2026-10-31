@@ -98,6 +98,7 @@ final class HistoryViewModel {
         for id in ids {
             do { try await store.delete(id: id) } catch { log("delete", error) }
         }
+        TempFiles.shared.release(records: ids) // temp copies of deleted captures (#114)
         await reload()
     }
 
@@ -111,7 +112,10 @@ final class HistoryViewModel {
     /// Deletes everything older than the retention setting.
     func purge() async {
         guard let store else { return }
-        do { try await store.purge(olderThan: retentionDays()) } catch { log("purge", error) }
+        do {
+            let removed = try await store.purge(olderThan: retentionDays())
+            TempFiles.shared.release(records: removed) // #114
+        } catch { log("purge", error) }
         await reload()
     }
 

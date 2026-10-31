@@ -70,6 +70,64 @@ enum QuickAccessLayout {
         return frames
     }
 
+    /// Most panels on screen at once; older ones wait behind the "+N" badge (#116).
+    static let maxVisible = 5
+    /// Size of the "+N" badge.
+    static let badgeSize = CGSize(width: 56, height: 24)
+
+    /// What's on screen for a stack of panels, newest first.
+    struct Stack: Equatable {
+        /// Frames of the newest `frames.count` panels; the rest are hidden.
+        var frames: [CGRect]
+        /// Panels past the cap or past the screen, shown as "+N".
+        var hiddenCount: Int
+        /// Where the "+N" badge goes; nil when nothing is hidden.
+        var badgeFrame: CGRect?
+    }
+
+    /// Lays out at most `maxVisible` panels, never past `visible`: a panel whose column would
+    /// leave the screen is hidden instead, and every frame is clamped inside `visible`. The
+    /// newest panel always shows, clamped if it's larger than the screen.
+    static func stack(for sizes: [CGSize], corner: ScreenCorner, in visible: CGRect,
+                      maxVisible: Int = maxVisible) -> Stack {
+        let candidates = frames(for: Array(sizes.prefix(max(maxVisible, 1))), corner: corner, in: visible)
+        var shown: [CGRect] = []
+        for (index, frame) in candidates.enumerated() {
+            let fits = visible.insetBy(dx: margin, dy: margin).contains(frame)
+            if index > 0, !fits { break }
+            shown.append(clamp(frame, to: visible))
+        }
+        let hidden = sizes.count - shown.count
+        let badge = hidden > 0 ? badgeFrame(after: shown, corner: corner, in: visible) : nil
+        return Stack(frames: shown, hiddenCount: hidden, badgeFrame: badge)
+    }
+
+    /// `frame` moved (and shrunk only if it must) to lie inside `visible`.
+    static func clamp(_ frame: CGRect, to visible: CGRect) -> CGRect {
+        let width = min(frame.width, visible.width)
+        let height = min(frame.height, visible.height)
+        let x = min(max(frame.minX, visible.minX), visible.maxX - width)
+        let y = min(max(frame.minY, visible.minY), visible.maxY - height)
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// Badge beside the oldest shown panel, on its far side from the corner; overlaps that
+    /// panel's far edge when there's no room. Always inside `visible`.
+    private static func badgeFrame(after frames: [CGRect], corner: ScreenCorner, in visible: CGRect) -> CGRect {
+        guard let last = frames.last else {
+            return clamp(CGRect(origin: CGPoint(x: visible.minX + margin, y: visible.minY + margin),
+                                size: badgeSize), to: visible)
+        }
+        let x = corner.isLeft ? last.minX : last.maxX - badgeSize.width
+        let y = corner.isBottom ? last.maxY + spacing / 2 : last.minY - spacing / 2 - badgeSize.height
+        var badge = CGRect(origin: CGPoint(x: x, y: y), size: badgeSize)
+        if !visible.contains(badge) {
+            // No room past the panel: sit just inside its far edge.
+            badge.origin.y = corner.isBottom ? last.maxY - badgeSize.height - padding : last.minY + padding
+        }
+        return clamp(badge, to: visible)
+    }
+
     /// Where a panel starts its slide-in: pushed past the side edge it docks against.
     static func entryFrame(for frame: CGRect, corner: ScreenCorner) -> CGRect {
         let shift = frame.width + margin

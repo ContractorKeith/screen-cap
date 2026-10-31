@@ -203,8 +203,8 @@ extension EditorWindowController {
         canvas.commitTextEditing()
         do {
             let data = try model.exportData(format: .png)
-            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenCap", isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let folder = try TempFiles.shared.makeFolder() // removed at quit (#114)
+            TempFiles.shared.track(folder, owner: .token(UUID()))
             let url = try EditorFileWriter.write(data, template: EditorFileWriter.literal(suggestedName()),
                                                  in: folder)
             let picker = NSSharingServicePicker(items: [url])

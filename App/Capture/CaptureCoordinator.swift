@@ -45,6 +45,10 @@ final class CaptureCoordinator {
     private var runningOutcome = CaptureOutcome.cancelled
     /// Shared with features that update records (Quick Access close/restore/delete).
     let history: HistoryStore?
+    /// Why History couldn't open at launch; captures are then treated like failed writes (#113).
+    var historyOpenError: Error?
+    /// The "History isn't being saved" HUD shows once per session.
+    private(set) var hasWarnedAboutHistory = false
     private let hasPermission: () -> Bool
     private let showOnboarding: () -> Void
     private var current: Task<Void, Never>?
@@ -225,9 +229,7 @@ final class CaptureCoordinator {
         var context = context
         context.kind = kind.filenameKind
         var result = CaptureResult(image: image, kind: kind, context: context)
-        let record = await addToHistory(result)
-        result.historyRecordID = record?.id
-        result.historyFileURL = record?.fileURL
+        await addToHistory(&result)
         var action = action ?? settings.afterCaptureAction(for: kind.shortcut)
         // Quick Access off: save here, so a failure gets the HUD and a failed outcome (#75).
         if action == .overlay, !showsQuickAccess() { action = .save }
@@ -254,19 +256,40 @@ final class CaptureCoordinator {
         }
     }
 
-    private func addToHistory(_ result: CaptureResult) async -> CaptureRecord? {
-        guard let history else { return nil }
+    /// Stores the capture in History and fills in its record. A failed write (or History that
+    /// couldn't open) marks the result `historyWriteFailed`, so Quick Access keeps it until it's
+    /// saved, and shows the reason once per session (#113).
+    private func addToHistory(_ result: inout CaptureResult) async {
+        guard let history else {
+            if let historyOpenError { historyWriteFailed(historyOpenError, &result) }
+            return
+        }
         let metadata = CaptureMetadata(scale: Double(result.image.scale), appName: result.context.app,
                                        windowTitle: result.context.window)
         do {
             // FilenameTemplate.Kind raw values match the history kinds (area, window, fullscreen, scrolling).
-            return try await history.add(image: result.image.cgImage,
-                                         kind: .init(rawValue: result.kind.filenameKind.rawValue),
-                                         metadata: metadata)
+            let record = try await history.add(image: result.image.cgImage,
+                                               kind: .init(rawValue: result.kind.filenameKind.rawValue),
+                                               metadata: metadata)
+            result.historyRecordID = record.id
+            result.historyFileURL = record.fileURL
         } catch {
-            appLog.error("History write failed: \(error.localizedDescription, privacy: .public)")
-            return nil
+            historyWriteFailed(error, &result)
         }
+    }
+
+    private func historyWriteFailed(_ error: Error, _ result: inout CaptureResult) {
+        result.historyWriteFailed = true
+        let reason = error.localizedDescription
+        appLog.error("History write failed: \(reason, privacy: .public)")
+        guard !hasWarnedAboutHistory else { return }
+        hasWarnedAboutHistory = true
+        alerts.historyFailed(Self.historyWarning(reason))
+    }
+
+    /// The once-per-session HUD text.
+    static func historyWarning(_ reason: String) -> String {
+        "History isn't being saved: \(reason)\nCaptures close for good unless you save them."
     }
 
     /// Front app name and its frontmost window title, for `{app}` and `{window}`.
@@ -284,6 +307,7 @@ struct CaptureAlerts {
     var outputFailed: @MainActor (AfterCaptureAction, Error, CaptureResult, CaptureOutput) -> Void = {
         CaptureFailureHUD.showOutputFailed($0, error: $1, result: $2, output: $3)
     }
+    var historyFailed: @MainActor (String) -> Void = { HUDPanel.show($0, duration: .seconds(6)) }
 }
 
 /// Persists "previous area" in settings so it survives relaunch.

@@ -15,6 +15,7 @@ struct InspectorView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .accessibilityLabel(A11y.inspectorPanel)
             .padding(10)
             ScrollView {
                 Group {
@@ -236,6 +237,8 @@ struct LabeledSlider: View {
                 if !editing { done() }
             }
             .labelsHidden()
+            .accessibilityLabel(title)
+            .accessibilityValue(String(format: format, value))
         }
     }
 }
@@ -256,9 +259,12 @@ struct ColorSection: View {
                     changed(RGBAColor(NSColor($0)))
                 }, supportsOpacity: true)
                 .labelsHidden()
+                .accessibilityLabel(title ?? "Color")
+                .accessibilityValue(A11y.colorName(color))
                 Button { sample() } label: { Image(systemName: "eyedropper") }
                     .buttonStyle(.borderless)
                     .help("Pick a color from the screen")
+                    .accessibilityLabel(A11y.pickScreenColor)
             }
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(22), spacing: 6), count: 8), spacing: 6) {
                 ForEach(Array(palette.enumerated()), id: \.offset) { index, swatch in
@@ -269,6 +275,10 @@ struct ColorSection: View {
                             .frame(width: 20, height: 20)
                     }
                     .buttonStyle(.plain)
+                    .help(A11y.colorName(swatch))
+                    .accessibilityLabel(A11y.colorName(swatch))
+                    .accessibilityValue(swatch == color ? A11y.selected : "")
+                    .accessibilityHint(A11y.swatchHint)
                     .contextMenu { Button("Remove from Palette") { palette.remove(at: index) } }
                 }
                 Button { if !palette.contains(color) { palette.append(color) } } label: {
@@ -276,6 +286,7 @@ struct ColorSection: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Add the current color to the palette")
+                .accessibilityLabel(A11y.addToPalette)
             }
         }
     }
