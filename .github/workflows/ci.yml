@@ -21,6 +21,7 @@ jobs:
       - name: Build
         run: swift build
       - name: Test
+        timeout-minutes: 15
         run: swift test
       - name: SwiftLint
         run: |
