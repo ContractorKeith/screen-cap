@@ -29,7 +29,12 @@ struct SettingsView: View {
     @Bindable var navigation: SettingsNavigation
 
     static let sidebarWidth: CGFloat = 180
+    /// Panes are laid out for this size; the width is what the shortcut recorders and popups need.
     static let paneSize = CGSize(width: 660, height: 580)
+    /// Shortest the window gets on a small screen; the panes scroll below their full height (#115).
+    static let minPaneHeight: CGFloat = 360
+    /// Sidebar, divider and pane at full height.
+    static var contentSize: CGSize { CGSize(width: sidebarWidth + 1 + paneSize.width, height: paneSize.height) }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -40,9 +45,10 @@ struct SettingsView: View {
             .frame(width: Self.sidebarWidth)
             Divider()
             pane(navigation.tab)
-                .frame(width: Self.paneSize.width, height: Self.paneSize.height)
+                .frame(width: Self.paneSize.width)
+                .frame(maxHeight: .infinity)
         }
-        .frame(height: Self.paneSize.height)
+        .frame(minHeight: Self.minPaneHeight, idealHeight: Self.paneSize.height, maxHeight: Self.paneSize.height)
     }
 
     /// List selection is optional; clicking empty sidebar space mustn't clear the tab.
@@ -115,16 +121,27 @@ final class SettingsWindowController {
         self.updater = updater
     }
 
-    /// Shows Settings, switching to `tab` when given (otherwise the last-used tab).
+    static let autosaveName = "ScreenCapSettingsWindow"
+
+    /// Shows Settings, switching to `tab` when given (otherwise the last-used tab). Opens at full
+    /// size when it fits, shorter (panes scroll) when it doesn't, always inside the screen's
+    /// visible frame at the remembered position (#115).
     func show(tab: AutomationCommand.SettingsTab? = nil) {
         if let tab { navigation.tab = tab }
-        if window == nil {
+        if let window {
+            WindowPlacement.clampOnScreen(window)
+        } else {
             let view = SettingsView(settings: settings, history: history, updater: updater, navigation: navigation)
-            let newWindow = NSWindow(contentViewController: NSHostingController(rootView: view))
+            let hosting = NSHostingController(rootView: view)
+            // The window, not SwiftUI, owns the size: fixed width, height between min and full.
+            hosting.sizingOptions = []
+            let newWindow = NSWindow(contentViewController: hosting)
             newWindow.title = "ScreenCap Settings"
-            newWindow.styleMask = [.titled, .closable]
+            newWindow.styleMask = [.titled, .closable, .resizable]
             newWindow.isReleasedWhenClosed = false
-            newWindow.center()
+            newWindow.contentMinSize = CGSize(width: SettingsView.contentSize.width, height: SettingsView.minPaneHeight)
+            newWindow.contentMaxSize = SettingsView.contentSize
+            WindowPlacement.placeNew(newWindow, autosaveName: Self.autosaveName, contentSize: SettingsView.contentSize)
             window = newWindow
         }
         NSApp.activate(ignoringOtherApps: true)

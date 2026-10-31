@@ -11,6 +11,8 @@ struct CaptureResult: Sendable {
     var historyRecordID: UUID?
     /// The history copy's file, offered when a save fails.
     var historyFileURL: URL?
+    /// History is on but couldn't store this capture, so closing it unsaved loses it (#113).
+    var historyWriteFailed = false
 }
 
 /// Receives captures whose after-capture action needs UI: `.overlay`, `.annotate`, `.pin`.

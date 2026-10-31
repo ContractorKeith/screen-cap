@@ -58,6 +58,7 @@ final class HistoryRetention {
             do {
                 let removed = try await work(store)
                 guard !removed.isEmpty else { return }
+                TempFiles.shared.release(records: removed) // temp copies of expired captures (#114)
                 appLog.notice("History retention purged \(removed.count) capture(s)")
                 NotificationCenter.default.post(name: .historyRecordsChanged, object: nil)
             } catch {

@@ -15,6 +15,10 @@ final class QuickAccessItem {
     var isHovered = false
     /// Where the stack layout put the panel; swipes move it relative to this.
     var baseFrame: CGRect = .zero
+    /// Past the visible-panel cap: ordered out, timer paused, counted in the "+N" badge (#116).
+    var isOverflowed = false
+    /// Owns this panel's drag-out temp files; released when the panel goes (#114).
+    let tempOwner = TempFiles.Owner.token(UUID())
     private var flashTask: Task<Void, Never>?
 
     init(result: CaptureResult, panel: QuickAccessPanel, timer: AutoCloseTimer) {
@@ -26,8 +30,13 @@ final class QuickAccessItem {
     // MARK: - Info line
 
     func refreshInfo() {
-        panel.setInfo(dimensions: dimensionsText, name: savedURL?.lastPathComponent ?? "Not saved")
+        let unsaved = result.historyWriteFailed ? "Not saved · not in History" : "Not saved"
+        panel.setInfo(dimensions: dimensionsText, name: savedURL?.lastPathComponent ?? unsaved)
     }
+
+    /// The capture exists only in this panel: History couldn't store it and it isn't saved (#113).
+    /// Such a panel never auto-closes and asks before closing.
+    var isOnlyCopy: Bool { result.historyWriteFailed && savedURL == nil }
 
     /// Shows a short status ("Copied") in place of the filename for a moment.
     func flash(_ message: String) {
@@ -67,13 +76,10 @@ final class QuickAccessItem {
         return try? Exporter(image: scaled.cgImage, format: format, scale: Double(scaled.scale)).data()
     }
 
-    /// Folder for drag-out temp files; emptied when Quick Access starts.
-    static let temporaryFolder = FileManager.default.temporaryDirectory
-        .appendingPathComponent("ScreenCap/QuickAccess", isDirectory: true)
-
     /// Encodes PNG data and writes a temp file named by the filename template, in the save format
-    /// and at the output scale. The panel and History keep the full-resolution capture.
-    static func prepareDrag(for result: CaptureResult, options: SaveOptions, in root: URL = temporaryFolder) async
+    /// and at the output scale, in a new folder under `root`. The panel and History keep the
+    /// full-resolution capture. The caller tracks the folder in `TempFiles` (#114).
+    static func prepareDrag(for result: CaptureResult, options: SaveOptions, in root: URL) async
         -> QuickAccessDragContents {
         let image = result.image
         let scale = options.scale

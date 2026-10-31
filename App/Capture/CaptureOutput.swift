@@ -10,9 +10,12 @@ final class CaptureOutput {
     private let settings: AppSettings
     /// Saves run one at a time, in the order they were asked for.
     private var lastSave: Task<Void, Never>?
+    /// Where copy-as-file writes; its files are removed when no longer needed (#114).
+    let temp: TempFiles
 
-    init(settings: AppSettings) {
+    init(settings: AppSettings, temp: TempFiles? = nil) {
         self.settings = settings
+        self.temp = temp ?? .shared
     }
 
     /// Where `save` writes, for messages.
@@ -50,12 +53,20 @@ final class CaptureOutput {
         }
     }
 
-    /// Copy-as-file needs a real file even when the user doesn't save; it goes to a temp folder.
-    private func writeTemporaryFile(_ result: CaptureResult) async throws -> URL {
-        let options = settings.saveOptions
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenCap", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return try await Self.write(result, options: options, in: folder)
+    /// Copy-as-file needs a real file even when the user doesn't save. It's tracked as the
+    /// clipboard file: the next copy-as-file replaces it, and deleting the capture's history
+    /// record or quitting removes it (#114).
+    func writeTemporaryFile(_ result: CaptureResult) async throws -> URL {
+        let folder = try temp.makeFolder()
+        do {
+            let url = try await Self.write(result, options: settings.saveOptions, in: folder)
+            temp.release(.clipboard)
+            temp.track(folder, owner: .clipboard, record: result.historyRecordID)
+            return url
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
     }
 
     /// Reserves a name, scales, encodes and writes over the placeholder; removes it on failure.

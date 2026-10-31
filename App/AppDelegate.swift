@@ -12,7 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let onboarding = PermissionOnboardingController()
     private let updater = UpdaterController()
     private lazy var settingsWindow = SettingsWindowController(settings: settings, updater: updater)
-    private lazy var history = Self.openHistory(retentionDays: settings.historyRetentionDays)
+    private lazy var historyOpening = Self.openHistory(retentionDays: settings.historyRetentionDays)
+    private var history: HistoryStore? { try? historyOpening.get() }
     private let desktopIcons = DesktopIconsController()
     private lazy var coordinator = CaptureCoordinator(
         settings: settings,
@@ -42,7 +43,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // No Dock icon. LSUIElement does this for the bundle; this covers `swift run`.
         NSApp.setActivationPolicy(.accessory)
+        TempFiles.shared.purgeStale() // temp files from earlier runs (#114)
         coordinator.sink = sinkRouter
+        if case let .failure(error) = historyOpening { coordinator.historyOpenError = error } // #113
         onboarding.firstCapture = { [weak self] in _ = self?.coordinator.capture(.area) }
         installFeatures()
         menuBar = MenuBarController(entries: AppMenu.entries(menuActions))
@@ -73,7 +76,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Unsaved editor windows ask Save / Don't Save / Cancel first (#73).
+    /// Quick Access captures History couldn't store ask to be saved first (#113).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let quickAccess = sinkRouter.overlay as? QuickAccessController, !quickAccess.onlyCopies.isEmpty else {
+            return reviewEditorsBeforeQuit(sender)
+        }
+        switch QuickAccessClosePrompt.ask(count: quickAccess.onlyCopies.count, quitting: true) {
+        case .cancel:
+            return .terminateCancel
+        case .discard:
+            return reviewEditorsBeforeQuit(sender)
+        case .save:
+            Task {
+                guard await quickAccess.saveOnlyCopies() else {
+                    sender.reply(toApplicationShouldTerminate: false)
+                    return
+                }
+                switch reviewEditorsBeforeQuit(sender) {
+                case .terminateNow: sender.reply(toApplicationShouldTerminate: true)
+                case .terminateCancel: sender.reply(toApplicationShouldTerminate: false)
+                default: break // the editor replies itself
+                }
+            }
+            return .terminateLater
+        }
+    }
+
+    private func reviewEditorsBeforeQuit(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let editor = sinkRouter.annotate as? EditorCoordinator else { return .terminateNow }
         return editor.reviewUnsavedBeforeQuit { sender.reply(toApplicationShouldTerminate: $0) }
     }
@@ -84,6 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let quickAccess = sinkRouter.overlay as? QuickAccessController, let history {
             QuickAccessQuit.recordClosedBeforeExit(quickAccess.openRecordIDs, in: history)
         }
+        TempFiles.shared.removeAll() // #114
     }
 
     private var menuActions: AppMenu.Actions {
@@ -146,12 +176,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings: settings, service: coordinator.service, history: coordinator.history
     )
 
-    private static func openHistory(retentionDays: Int) -> HistoryStore? {
+    /// The failure is kept so the first capture says why History is off (#113).
+    private static func openHistory(retentionDays: Int) -> Result<HistoryStore, Error> {
         do {
-            return try HistoryStore(retentionDays: retentionDays)
+            return .success(try HistoryStore(retentionDays: retentionDays))
         } catch {
             appLog.error("History unavailable: \(error.localizedDescription, privacy: .public)")
-            return nil
+            return .failure(error)
         }
     }
 }

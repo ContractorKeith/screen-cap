@@ -41,7 +41,7 @@ extension QuickAccessController {
         case .pin: handOff(item, to: router?.pin, action: .pin, notification: .pinRequested)
         case .ocr: requestText(item)
         case .reveal: Task { await reveal(item) }
-        case .close: remove(item, markClosed: true)
+        case .close: Task { await close(item) }
         case .delete: Task { await delete(item) }
         }
     }
@@ -49,7 +49,7 @@ extension QuickAccessController {
     private func finishSwipe(_ tracker: SwipeTracker, on item: QuickAccessItem) {
         switch tracker.action(for: settings.quickAccess.position) {
         case .dismiss:
-            remove(item, markClosed: true)
+            Task { await close(item) }
         case .save:
             Task {
                 if await save(item) != nil { remove(item, markClosed: true) } else { layout() }
@@ -57,6 +57,33 @@ extension QuickAccessController {
         case nil:
             layout()
         }
+    }
+
+    /// Close and the dismiss swipe. A capture that exists only in this panel (History couldn't
+    /// store it, #113) asks first: Save, Close Without Saving, or Cancel.
+    private func close(_ item: QuickAccessItem) async {
+        guard item.isOnlyCopy else {
+            remove(item, markClosed: true)
+            return
+        }
+        switch QuickAccessClosePrompt.ask() {
+        case .save:
+            if await save(item) != nil { remove(item, markClosed: true) } else { layout() }
+        case .discard:
+            remove(item, markClosed: true)
+        case .cancel:
+            layout()
+        }
+    }
+
+    /// Panels whose capture would be lost on quit (#113).
+    var onlyCopies: [QuickAccessItem] { items.filter(\.isOnlyCopy) }
+
+    /// Saves every panel that is the only copy of its capture. True when all saved.
+    func saveOnlyCopies() async -> Bool {
+        var allSaved = true
+        for item in onlyCopies where await save(item) == nil { allSaved = false }
+        return allSaved
     }
 
     private func copy(_ item: QuickAccessItem) async {
@@ -72,7 +99,7 @@ extension QuickAccessController {
     /// Saves once; later calls return the existing file. A save already running is shared, and
     /// the Save button is off until it finishes (#78).
     @discardableResult
-    private func save(_ item: QuickAccessItem) async -> URL? {
+    func save(_ item: QuickAccessItem) async -> URL? {
         if let url = item.savedURL { return url }
         let key = saveKey(item)
         let toolbar = item.panel.thumbnail.toolbar
@@ -108,6 +135,8 @@ extension QuickAccessController {
     /// Either failing shows why in a HUD (#105); the panel is already gone by then.
     private func delete(_ item: QuickAccessItem) async {
         remove(item, markClosed: false)
+        // Copy-as-file copies of this capture go too (#114).
+        if let id = item.result.historyRecordID { temp.release(records: [id]) }
         let deleteRecord: (() async throws -> Void)? = item.result.historyRecordID.flatMap { id in
             history.map { history in { _ = try await history.delete(id: id) } }
         }
@@ -143,5 +172,30 @@ extension QuickAccessController {
         ]
         if let id = item.result.historyRecordID { info[QuickAccessUserInfo.recordID] = id }
         NotificationCenter.default.post(name: .captureTextRequested, object: nil, userInfo: info)
+    }
+}
+
+/// The ask-before-closing alert for a capture History couldn't store (#113).
+@MainActor
+enum QuickAccessClosePrompt {
+    enum Choice { case save, discard, cancel }
+
+    static func ask(count: Int = 1, quitting: Bool = false) -> Choice {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = count == 1
+            ? "Save this capture before closing?"
+            : "Save \(count) captures before quitting?"
+        alert.informativeText = "History couldn't store \(count == 1 ? "it" : "them"), so "
+            + (quitting ? "quitting" : "closing") + " without saving loses \(count == 1 ? "it" : "them") for good."
+        alert.addButton(withTitle: count == 1 ? "Save" : "Save All")
+        alert.addButton(withTitle: quitting ? "Quit Without Saving" : "Close Without Saving")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .save
+        case .alertSecondButtonReturn: return .discard
+        default: return .cancel
+        }
     }
 }
