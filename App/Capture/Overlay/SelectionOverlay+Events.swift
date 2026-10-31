@@ -68,12 +68,12 @@ extension SelectionOverlay {
     private func updateDrag(shift: Bool) {
         guard let start = state.dragStart else { return }
         if shift, state.lockedAspect == nil {
-            let current = state.rect.map { $0.width / max($0.height, 1) } ?? 1
-            state.lockedAspect = current > 0 ? current : 1
+            state.lockedAspect = SelectionMath.lockedAspect(current: state.rect, fallback: state.lastSelection)
         } else if !shift {
             state.lockedAspect = nil
         }
-        state.rect = SelectionMath.rect(from: start, to: state.mouse, aspect: state.lockedAspect)
+        state.rect = SelectionMath.rect(from: start, to: state.mouse, aspect: state.lockedAspect,
+                                        within: geometry.unionFrame)
         redraw()
     }
 
@@ -133,6 +133,7 @@ extension SelectionOverlay {
     /// A finished selection: All-In-One shows its toolbar; everything else captures it.
     private func confirm(_ rect: CGRect) {
         state.rect = rect
+        state.lastSelection = rect
         state.fixedSize = nil
         if options.allInOne {
             showToolbar(for: rect)

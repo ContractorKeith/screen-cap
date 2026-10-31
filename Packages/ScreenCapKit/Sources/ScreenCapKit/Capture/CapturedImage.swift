@@ -1,5 +1,6 @@
 // Value types the capture service returns.
 import CoreGraphics
+import Foundation
 
 /// A captured still plus where it came from.
 public struct CapturedImage: @unchecked Sendable {
@@ -101,4 +102,14 @@ public enum CaptureError: Error, Equatable {
     case windowNotFound(CGWindowID)
     /// The requested area doesn't overlap any display.
     case areaOffScreen(CGRect)
+}
+
+extension CaptureError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .displayNotFound: "That display is no longer available."
+        case .windowNotFound: "That window is no longer on screen."
+        case .areaOffScreen: "The selected area isn't on any display."
+        }
+    }
 }

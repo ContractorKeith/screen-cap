@@ -22,6 +22,13 @@ final class CaptureCoordinator {
     var scrollingHandler: (@MainActor (CGRect, FilenameTemplate.Context, AfterCaptureAction?) async -> Void)?
     /// Region for the next scrolling capture, skipping the selection overlay (`--region`). Used once.
     var scrollingRegion: CGRect?
+    /// Runs OCR on a selected area's image (App/TextRecognition). Awaited, so `--quit` waits for it.
+    /// Nil posts `.captureTextRequested` with the rect instead.
+    var textHandler: (@MainActor (CGImage) async throws -> Void)?
+    /// How the most recent capture request ended; set when it finishes or is refused.
+    private(set) var lastOutcome: CaptureOutcome?
+    /// Outcome of the capture running now, folded as images are delivered.
+    private var runningOutcome = CaptureOutcome.cancelled
     /// Shared with features that update records (Quick Access close/restore/delete).
     let history: HistoryStore?
     private let hasPermission: () -> Bool
@@ -74,15 +81,21 @@ final class CaptureCoordinator {
         start("window of \(app)") { coordinator in try await coordinator.runWindow(ofApp: app, action: action) }
     }
 
-    /// Permission check, one capture at a time, error logging.
+    /// Permission check, one capture at a time, error logging and the failure HUD.
     private func start(_ label: String, _ body: @escaping @MainActor (CaptureCoordinator) async throws -> Void)
         -> Task<Void, Never>? {
         guard hasPermission() else {
             appLog.notice("Screen Recording not granted; showing onboarding")
+            lastOutcome = .notStarted("Screen Recording permission not granted")
             showOnboarding()
             return nil
         }
-        guard current == nil else { return nil }
+        guard current == nil else {
+            appLog.notice("Capture \(label, privacy: .public) ignored: another capture is in progress")
+            CaptureFailureHUD.showBusy()
+            return nil
+        }
+        runningOutcome = .cancelled
         let task = Task { [weak self] in
             guard let self else { return }
             let coverIcons = settings.hideDesktopIcons && desktopIcons?.beginTemporaryHide() == true
@@ -91,14 +104,22 @@ final class CaptureCoordinator {
                 if coverIcons { try await Task.sleep(for: Self.overlayHideDelay) }
                 try await body(self)
             } catch {
-                let reason = String(describing: error)
-                appLog.error("Capture \(label, privacy: .public) failed: \(reason, privacy: .public)")
+                let detail = String(describing: error)
+                appLog.error("Capture \(label, privacy: .public) failed: \(detail, privacy: .public)")
+                record(.failed(error.localizedDescription))
+                CaptureFailureHUD.showCaptureFailed(error)
             }
             if coverIcons { desktopIcons?.endTemporaryHide() }
+            lastOutcome = runningOutcome
             self.current = nil
         }
         current = task
         return task
+    }
+
+    /// Folds an event into the running capture's outcome.
+    func record(_ outcome: CaptureOutcome) {
+        runningOutcome = runningOutcome.merged(with: outcome)
     }
 
     /// Self-timer with a specific length; remembers it as the new default.
@@ -110,16 +131,18 @@ final class CaptureCoordinator {
 
     // MARK: - Delivery
 
-    /// Scales, records in history, then applies the after-capture action.
+    /// Records in history at full resolution, then applies the after-capture action.
+    /// The output scale is applied by `CaptureOutput` when a file or the clipboard is written.
     func deliver(_ image: CapturedImage, kind: CaptureKind, context: FilenameTemplate.Context,
                  action: AfterCaptureAction?) async {
         var context = context
         context.kind = kind.filenameKind
-        var result = CaptureResult(image: OutputScaler.scaled(image, to: settings.retinaScale),
-                                   kind: kind, context: context)
-        result.historyRecordID = await addToHistory(result)
+        var result = CaptureResult(image: image, kind: kind, context: context)
+        let record = await addToHistory(result)
+        result.historyRecordID = record?.id
+        result.historyFileURL = record?.fileURL
         let action = action ?? settings.afterCaptureAction(for: kind.shortcut)
-        let size = "\(result.image.cgImage.width)x\(result.image.cgImage.height)"
+        let size = "\(image.cgImage.width)x\(image.cgImage.height)"
         let summary = "\(kind.rawValue) \(size) px, \(action.rawValue)"
         appLog.notice("Captured \(summary, privacy: .public)")
         do {
@@ -133,13 +156,16 @@ final class CaptureCoordinator {
             case .overlay, .annotate, .pin:
                 await sink.deliver(result, action: action)
             }
+            self.record(.delivered)
         } catch {
             let reason = error.localizedDescription
             appLog.error("After-capture \(action.rawValue, privacy: .public) failed: \(reason, privacy: .public)")
+            self.record(.failed(reason))
+            CaptureFailureHUD.showOutputFailed(action, error: error, result: result, output: output)
         }
     }
 
-    private func addToHistory(_ result: CaptureResult) async -> UUID? {
+    private func addToHistory(_ result: CaptureResult) async -> CaptureRecord? {
         guard let history else { return nil }
         let metadata = CaptureMetadata(scale: Double(result.image.scale), appName: result.context.app,
                                        windowTitle: result.context.window)
@@ -147,7 +173,7 @@ final class CaptureCoordinator {
             // FilenameTemplate.Kind raw values match the history kinds (area, window, fullscreen, scrolling).
             return try await history.add(image: result.image.cgImage,
                                          kind: .init(rawValue: result.kind.filenameKind.rawValue),
-                                         metadata: metadata).id
+                                         metadata: metadata)
         } catch {
             appLog.error("History write failed: \(error.localizedDescription, privacy: .public)")
             return nil

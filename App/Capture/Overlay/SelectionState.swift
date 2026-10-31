@@ -21,6 +21,14 @@ enum AllInOneChoice: String, CaseIterable {
         }
     }
 
+    /// Whether this choice's rect becomes the new "previous area". OCR and scrolling regions don't.
+    var remembersArea: Bool {
+        switch self {
+        case .area, .window, .fullscreen, .timer: true
+        case .scrolling, .text: false
+        }
+    }
+
     var symbolName: String {
         switch self {
         case .area: "rectangle.dashed"
@@ -65,6 +73,8 @@ final class SelectionState {
     var mouse: CGPoint = .zero
     /// Drag anchor; nil when not dragging.
     var dragStart: CGPoint?
+    /// The last confirmed selection (or the previous area); ⇧ falls back to its ratio.
+    var lastSelection: CGRect?
     /// Width ÷ height while ⇧ is held during a drag.
     var lockedAspect: CGFloat?
     /// Typed W×H; while set the rect follows the cursor.
@@ -75,6 +85,7 @@ final class SelectionState {
     init(mode: SelectionMode, previousRect: CGRect?) {
         self.mode = mode
         self.previousRect = previousRect
+        self.lastSelection = previousRect
     }
 
     var isDragging: Bool { dragStart != nil }

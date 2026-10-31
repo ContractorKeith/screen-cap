@@ -59,24 +59,55 @@ public struct FilenameTemplate: Sendable {
 
     /// First URL in `folder` that `fileExists` reports free. With `{counter}` in the template the
     /// counter increments; otherwise ` 2`, ` 3`, ... is appended before the extension.
+    ///
+    /// Only a probe: another writer can take the name before you write. Writers that suspend
+    /// between choosing a name and writing should use `reserveUniqueURL(in:context:)`.
     public func uniqueURL(
         in folder: URL,
         context: Context = Context(),
         fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
     ) -> URL {
+        let candidates = candidateURLs(in: folder, context: context)
+        for url in candidates.names where !fileExists(url) { return url }
+        return candidates.fallback
+    }
+
+    /// Claims a free name by creating an empty file there with `O_EXCL`, so two concurrent saves
+    /// can never pick the same name. Write the real data over the returned URL afterwards
+    /// (an `.atomic` write replaces the placeholder); remove it if the write fails.
+    public func reserveUniqueURL(in folder: URL, context: Context = Context()) throws -> URL {
+        let candidates = candidateURLs(in: folder, context: context)
+        for url in candidates.names where try Self.createExclusively(url) { return url }
+        guard try Self.createExclusively(candidates.fallback) else {
+            throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: folder.path])
+        }
+        return candidates.fallback
+    }
+
+    /// Creates an empty file only if nothing exists at `url` (`O_CREAT | O_EXCL`). False if taken.
+    private static func createExclusively(_ url: URL) throws -> Bool {
+        do {
+            try Data().write(to: url, options: .withoutOverwriting)
+            return true
+        } catch CocoaError.fileWriteFileExists {
+            return false
+        }
+    }
+
+    /// Names in the order they are tried, plus a UUID name for a pathological folder.
+    private func candidateURLs(in folder: URL, context: Context) -> (names: LazyMapSequence<ClosedRange<Int>, URL>,
+                                                                       fallback: URL) {
         let date = clock()
         let usesCounter = template.contains("{counter}")
         let baseStem = render(context: context, date: date, counter: 1)
-
-        for attempt in 1...Self.maxAttempts {
+        let names = (1...Self.maxAttempts).lazy.map { attempt in
             let name = usesCounter
                 ? filename(stem: render(context: context, date: date, counter: attempt), suffix: "")
                 : filename(stem: baseStem, suffix: attempt == 1 ? "" : " \(attempt)")
-            let url = folder.appendingPathComponent(name, isDirectory: false)
-            if !fileExists(url) { return url }
+            return folder.appendingPathComponent(name, isDirectory: false)
         }
-        // Pathological folder: fall back to a name that can't collide.
-        return folder.appendingPathComponent(filename(stem: baseStem, suffix: " \(UUID().uuidString)"))
+        let fallback = folder.appendingPathComponent(filename(stem: baseStem, suffix: " \(UUID().uuidString)"))
+        return (names, fallback)
     }
 
     // MARK: - Rendering
