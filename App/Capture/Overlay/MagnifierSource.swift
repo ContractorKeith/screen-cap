@@ -67,7 +67,7 @@ protocol PixelSampler: Sendable {
 /// (the overlay itself) excluded. Shareable content is fetched once per session.
 actor ScreenPixelSampler: PixelSampler {
     private let excludedBundleIdentifier: String?
-    private var content: SCShareableContent?
+    private var content: UncheckedSendable<SCShareableContent>?
 
     init(excludedBundleIdentifier: String? = Bundle.main.bundleIdentifier ?? ScreenCapKit.bundleIdentifier) {
         self.excludedBundleIdentifier = excludedBundleIdentifier
@@ -76,35 +76,47 @@ actor ScreenPixelSampler: PixelSampler {
     func sample(pointRect: CGRect, display: DisplayInfo) async -> CapturedImage? {
         do {
             let content = try await shareableContent()
-            guard let screen = content.displays.first(where: { $0.displayID == display.id }) else { return nil }
-            let own = content.applications.filter { $0.bundleIdentifier == excludedBundleIdentifier }
-            let filter = SCContentFilter(display: screen, excludingApplications: own, exceptingWindows: [])
-            let config = SCStreamConfiguration()
-            // sourceRect is display-local points with a top-left origin.
-            config.sourceRect = CGRect(x: pointRect.minX - display.frame.minX, y: display.frame.maxY - pointRect.maxY,
-                                       width: pointRect.width, height: pointRect.height)
-            config.width = max(Int((pointRect.width * display.backingScale).rounded()), 1)
-            config.height = max(Int((pointRect.height * display.backingScale).rounded()), 1)
-            config.captureResolution = .best
-            config.showsCursor = false
-            let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-            return CapturedImage(cgImage: image, scale: display.backingScale, pointRect: pointRect,
-                                 displayID: display.id)
+            return try await Self.capture(
+                content: content, excludedBundleIdentifier: excludedBundleIdentifier,
+                pointRect: pointRect, display: display
+            )
         } catch {
             return nil
         }
     }
 
-    private func shareableContent() async throws -> SCShareableContent {
+    private func shareableContent() async throws -> UncheckedSendable<SCShareableContent> {
         if let content { return content }
-        let fresh = try await Self.fetchShareableContent().value
+        let fresh = try await Self.fetchShareableContent()
         content = fresh
         return fresh
     }
 
-    /// Older SDKs (CI's macOS 15 runner) don't mark `SCShareableContent` Sendable; it is immutable.
+    // ScreenCaptureKit types aren't Sendable on older SDKs (CI's macOS 15 runner), so the filter is
+    // built and consumed in one nonisolated context, as CaptureService does.
     private nonisolated static func fetchShareableContent() async throws -> UncheckedSendable<SCShareableContent> {
         UncheckedSendable(try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true))
+    }
+
+    private nonisolated static func capture(
+        content: UncheckedSendable<SCShareableContent>, excludedBundleIdentifier: String?,
+        pointRect: CGRect, display: DisplayInfo
+    ) async throws -> CapturedImage? {
+        let content = content.value
+        guard let screen = content.displays.first(where: { $0.displayID == display.id }) else { return nil }
+        let own = content.applications.filter { $0.bundleIdentifier == excludedBundleIdentifier }
+        let filter = SCContentFilter(display: screen, excludingApplications: own, exceptingWindows: [])
+        let config = SCStreamConfiguration()
+        // sourceRect is display-local points with a top-left origin.
+        config.sourceRect = CGRect(x: pointRect.minX - display.frame.minX, y: display.frame.maxY - pointRect.maxY,
+                                   width: pointRect.width, height: pointRect.height)
+        config.width = max(Int((pointRect.width * display.backingScale).rounded()), 1)
+        config.height = max(Int((pointRect.height * display.backingScale).rounded()), 1)
+        config.captureResolution = .best
+        config.showsCursor = false
+        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        return CapturedImage(cgImage: image, scale: display.backingScale, pointRect: pointRect,
+                             displayID: display.id)
     }
 }
 
