@@ -135,13 +135,16 @@ struct RepetitiveScrollTests {
     }
 
     // The page moved 60/140 while 100 was posted: no candidate matches 100, so nothing is
-    // trusted to it (was 3037 px, 2696 wrong rows).
+    // trusted to it (was 3037 px, 2696 wrong rows). Frames that can't be placed follow a seam
+    // from where the image ends, so rows may be missing at a seam but none repeat (#112; was
+    // 2268 px, repeating what the 1600 px page had already shown after each seam).
     @Test(arguments: [true, false])
     func autoScrollDistanceThatDoesNotMatchIsIgnored(usesVision: Bool) async throws {
         let tops = TextScrollFixtures.positions([60, 140, 60, 140, 60, 140, 60, 140, 60, 140])
         let result = try await run(TextScrollFixtures.terminal, tops: tops, posted: { _, _ in 100 },
                                    usesVision: usesVision)
-        #expect(result.height == 2268, "\(result.outcomes)")
+        #expect(result.height == 1098, "\(result.outcomes)")
+        #expect(result.segments.reduce(0) { $0 + $1.count } <= 1600, "rows repeated after a seam")
         expectFaithful(result, page: TextScrollFixtures.terminal, end: 1600, complete: false)
     }
 
