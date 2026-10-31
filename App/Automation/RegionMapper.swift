@@ -6,13 +6,14 @@ import ScreenCapKit
 enum RegionMapper {
     /// - Parameter displayFrames: Display frames in global AppKit points, in `NSScreen.screens`
     ///   order (display 1 is the primary display, the one with the menu bar).
-    /// - Returns: nil when the display doesn't exist or the region misses it entirely.
+    /// - Returns: nil when the display doesn't exist or the region doesn't lie fully inside it
+    ///   (a partly-off region would otherwise be clipped silently).
     static func globalRect(for region: Region, displayFrames: [CGRect]) -> CGRect? {
         guard displayFrames.indices.contains(region.display - 1) else { return nil }
         let frame = displayFrames[region.display - 1]
         let rect = CGRect(x: frame.minX + region.x, y: frame.minY + region.y,
                           width: region.width, height: region.height)
-        guard rect.intersects(frame) else { return nil }
+        guard frame.contains(rect) else { return nil }
         return rect
     }
 }

@@ -82,3 +82,22 @@ struct DocumentCodingTests {
         #expect(document.baseImage.pixelWidth == 2880)
     }
 }
+
+@Suite("Background edge padding coding")
+struct BackgroundEdgePaddingCodingTests {
+    @Test func edgePaddingRoundTripsAndOldFilesDecodeAsUniform() throws {
+        var background = Document.Background(fill: .solid(color: .black), padding: 20)
+        background.edgePadding = EffectsInsets(top: 20, left: 30, bottom: 60, right: 30)
+        let decoded = try JSONDecoder().decode(Document.Background.self, from: JSONEncoder().encode(background))
+        #expect(decoded == background)
+        #expect(decoded.resolvedPadding == EffectsInsets(top: 20, left: 30, bottom: 60, right: 30))
+
+        // A file written before edgePadding existed has no key and falls back to `padding`.
+        background.edgePadding = nil
+        let json = try JSONEncoder().encode(background)
+        #expect(String(bytes: json, encoding: .utf8)?.contains("edgePadding") == false)
+        let old = try JSONDecoder().decode(Document.Background.self, from: json)
+        #expect(old.edgePadding == nil)
+        #expect(old.resolvedPadding == EffectsInsets(all: 20))
+    }
+}

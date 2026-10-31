@@ -32,10 +32,13 @@ public enum AutomationCommand: Equatable, Sendable {
         case region(Region)
     }
 
-    /// Settings tabs addressable from `open-settings`. Raw values are the URL spelling.
+    /// Every Settings tab, addressable from `open-settings`. Raw values are the URL spelling and
+    /// the persisted last-used tab. There is no `history` tab: retention lives under Advanced and
+    /// the History window opens with `open-history`.
     public enum SettingsTab: String, CaseIterable, Sendable {
-        case general, shortcuts, screenshots, annotate, wallpaper, history, advanced, about
+        case general, shortcuts
         case quickAccess = "quickaccess"
+        case screenshots, scrolling, text, annotate, wallpaper, advanced, about
     }
 
     /// The host name used in the URL, e.g. `capture-area`.

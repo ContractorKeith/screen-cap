@@ -5,7 +5,7 @@ import Testing
 import Vision
 
 /// Runs real Vision requests against images rendered in code.
-@Suite("Vision recognition")
+@Suite("Vision recognition", .serialized)
 struct VisionRecognitionTests {
     struct OCRCase: Sendable, CustomStringConvertible {
         let name: String

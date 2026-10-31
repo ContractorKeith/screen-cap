@@ -86,19 +86,25 @@ final class QuickAccessItem {
 
     // MARK: - Restore from history
 
-    /// Rebuilds a capture result from a history record, for Restore Recently Closed.
+    /// Rebuilds a capture result from a history record (Restore, `add-quick-access-overlay`).
     static func result(from record: CaptureRecord, image: CGImage) -> CaptureResult {
-        let scale = CGFloat(max(record.scale, 1))
+        result(image: image, scale: CGFloat(max(record.scale, 1)),
+               kind: CaptureKind(rawValue: record.kind.rawValue) ?? .area,
+               context: FilenameTemplate.Context(app: record.appName, window: record.windowTitle),
+               recordID: record.id)
+    }
+
+    static func result(image: CGImage, scale: CGFloat, kind: CaptureKind, context: FilenameTemplate.Context,
+                       recordID: UUID?) -> CaptureResult {
         let points = CGSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
-        let kind = CaptureKind(rawValue: record.kind.rawValue) ?? .area
-        var context = FilenameTemplate.Context(app: record.appName, window: record.windowTitle)
+        var context = context
         context.kind = kind.filenameKind
         var result = CaptureResult(
             image: CapturedImage(cgImage: image, scale: scale, pointRect: CGRect(origin: .zero, size: points),
                                  displayID: nil),
             kind: kind, context: context
         )
-        result.historyRecordID = record.id
+        result.historyRecordID = recordID
         return result
     }
 }

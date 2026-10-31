@@ -9,16 +9,26 @@ final class HistoryWindowController {
     let model: HistoryViewModel
     private let settings: AppSettings
     private var window: NSWindow?
-    private var observer: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
 
     init(store: HistoryStore?, settings: AppSettings) {
         self.settings = settings
         self.model = HistoryViewModel(store: store, retentionDays: { [settings] in settings.historyRetentionDays })
-        observer = NotificationCenter.default.addObserver(
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(
             forName: .openHistoryRequested, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.show() }
-        }
+        })
+        // Quick Access restores and OCR change records while the window may be open.
+        observers.append(center.addObserver(
+            forName: .historyRecordsChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let model = self?.model else { return }
+                Task { await model.reload() }
+            }
+        })
     }
 
     func show() {
@@ -88,14 +98,12 @@ struct HistoryActions {
         Task { await model.delete(ids) }
     }
 
-    /// Marks the records open again and shows them in Quick Access.
+    /// Shows the closed records in Quick Access, which marks them open once shown.
     func restore(_ ids: Set<UUID>) {
-        Task {
-            for record in await model.restore(ids) {
-                NotificationCenter.default.post(name: .addQuickAccessOverlayRequested, object: nil, userInfo: [
-                    AutomationKey.url: record.fileURL, AutomationKey.recordID: record.id
-                ])
-            }
+        for record in model.restorable(ids) {
+            NotificationCenter.default.post(name: .addQuickAccessOverlayRequested, object: nil, userInfo: [
+                AutomationKey.url: record.fileURL, AutomationKey.recordID: record.id
+            ])
         }
     }
 
