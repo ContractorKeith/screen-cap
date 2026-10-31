@@ -20,6 +20,40 @@ struct CaptureLogicTests {
         #expect(window.windowApp == "Terminal")
     }
 
+    /// #119: a bad `--region` with `--quit` is a usage error (exit 3), never the interactive overlay.
+    @Test(arguments: ["nan,0,100,100", "0,0,inf,100", "1e3,0,100,100", "0x10,0,100,100", "1,2,3"])
+    func badRegionWithQuitFailsFast(region: String) {
+        let parsed = LaunchArguments.parse(["ScreenCap", "--capture", "scrolling", "--region", region, "--quit"])
+        #expect(parsed.problems == ["\(LaunchArguments.regionUsage), got \(region)"])
+        #expect(parsed.warnings.isEmpty)
+        #expect(parsed.requestsCapture)
+        #expect(CaptureOutcome.notStarted(parsed.problems[0]).exitStatus == 3)
+    }
+
+    @Test func badRegionOptionOrderAndMissingValue() {
+        let quitFirst = LaunchArguments.parse(["ScreenCap", "--quit", "--capture", "scrolling", "--region", "nan"])
+        #expect(quitFirst.problems.count == 1)
+        let missing = LaunchArguments.parse(["ScreenCap", "--capture", "scrolling", "--region", "--quit"])
+        #expect(missing.quitAfterCapture)
+        #expect(missing.problems == ["\(LaunchArguments.regionUsage), got nothing"])
+    }
+
+    @Test func badRegionWithoutQuitWarnsAndFallsBack() {
+        let parsed = LaunchArguments.parse(["ScreenCap", "--capture", "scrolling", "--region", "nan,0,100,100"])
+        #expect(parsed.problems.isEmpty)
+        #expect(parsed.capture == .scrolling)
+        let expected = "\(LaunchArguments.regionUsage), got nan,0,100,100; selecting the region interactively"
+        #expect(parsed.warnings == [expected])
+    }
+
+    @Test func goodOrAbsentRegionIsSilent() {
+        let good = LaunchArguments.parse(["ScreenCap", "--capture", "scrolling", "--region", "-10,0,100,100", "--quit"])
+        #expect(good.problems.isEmpty && good.warnings.isEmpty)
+        #expect(good.capture == .scrolling && good.quitAfterCapture)
+        let absent = LaunchArguments.parse(["ScreenCap", "--capture", "scrolling", "--quit"])
+        #expect(absent.problems.isEmpty && absent.warnings.isEmpty)
+    }
+
     @Test func everyKindRawValueRoundTrips() {
         for kind in CaptureKind.allCases {
             #expect(CaptureKind(rawValue: kind.rawValue) == kind)

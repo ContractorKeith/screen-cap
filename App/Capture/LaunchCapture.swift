@@ -9,6 +9,10 @@ extension CaptureCoordinator {
         appLog.notice("Launch capture: \(summary, privacy: .public)")
         let outcome: CaptureOutcome?
         let task: Task<Void, Never>?
+        for warning in launch.warnings {
+            appLog.error("Launch arguments: \(warning, privacy: .public)")
+            FileHandle.standardError.write(Data("ScreenCap: \(warning)\n".utf8))
+        }
         if !launch.problems.isEmpty {
             let problems = launch.problems.joined(separator: "; ")
             appLog.error("Launch arguments: \(problems, privacy: .public)")

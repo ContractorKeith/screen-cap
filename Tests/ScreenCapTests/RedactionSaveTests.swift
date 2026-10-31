@@ -8,16 +8,11 @@ import Testing
 @Suite("Editor redaction save")
 @MainActor
 struct RedactionSaveTests {
-    private func makeDefaults() -> UserDefaults {
-        let name = "RedactionSaveTests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defaults.removePersistentDomain(forName: name)
-        return defaults
-    }
-
     @Test func confirmationOnlyWhenRedactionsAndNotYetConfirmed() {
         let model = EditorDocumentModel(snapshot: EditorSnapshot(image: EditorModelTests.image(), scale: 1))
-        let defaults = makeDefaults()
+        let suite = TemporaryDefaults()
+        defer { suite.remove() }
+        let defaults = suite.store
         model.add(.counter(number: 1, center: CGPoint(x: 10, y: 10), radius: 6))
         #expect(!model.needsRedactionBakeConfirmation(defaults: defaults))
         model.add(.blur(rect: CGRect(x: 0, y: 0, width: 30, height: 20), mode: .secure, radius: 12))

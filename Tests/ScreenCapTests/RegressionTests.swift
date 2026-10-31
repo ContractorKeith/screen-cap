@@ -54,9 +54,9 @@ struct SettingsResetRegressionTests {
     }
 
     @Test func resetRemovesEveryRegistryKey() {
-        let name = "screencap.tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)! // swiftlint:disable:this force_unwrapping
-        defer { UserDefaults().removePersistentDomain(forName: name) }
+        let suite = TemporaryDefaults()
+        defer { suite.remove() }
+        let name = suite.name, defaults = suite.store
         for key in SettingsKeys.all { defaults.set(true, forKey: key) }
         defaults.set(true, forKey: "welcome.dontShowAgain")
 
