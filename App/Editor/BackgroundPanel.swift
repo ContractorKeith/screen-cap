@@ -86,6 +86,8 @@ struct BackgroundPanel: View {
                 }
                 .buttonStyle(.plain)
                 .help(name)
+                .accessibilityLabel(A11y.background(name))
+                .accessibilityValue(name == selected ? A11y.selected : "")
             }
         }
     }
@@ -143,6 +145,9 @@ struct BackgroundPanel: View {
                                     .frame(width: 18, height: 14)
                             }
                             .buttonStyle(.plain)
+                            .help(A11y.alignment(alignment))
+                            .accessibilityLabel(A11y.alignment(alignment))
+                            .accessibilityValue(alignment == current ? A11y.selected : "")
                         }
                     }
                 }
