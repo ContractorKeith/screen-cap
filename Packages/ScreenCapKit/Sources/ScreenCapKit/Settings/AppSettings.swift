@@ -12,6 +12,7 @@ public final class AppSettings {
         case afterCaptureActions, freezeScreen, showCrosshair, showMagnifier, quickAccess
         case hideDesktopIcons, launchAtLogin, lastCaptureRect, colorPalette
         case ocrKeepLineBreaks, ocrLanguages
+        case windowShadow, fullscreenAllDisplays, selfTimerSeconds
     }
 
     /// Default values, shared with tests.
@@ -34,6 +35,9 @@ public final class AppSettings {
             RGBAColor(red: 1, green: 1, blue: 1)
         ]
         public static let ocrLanguages = ["en-US"]
+        public static let selfTimerSeconds = 5
+        /// Countdown lengths offered in the menu and settings.
+        public static let selfTimerChoices = [3, 5, 10]
     }
 
     @ObservationIgnored private let store: any SettingsStore
@@ -62,6 +66,12 @@ public final class AppSettings {
     public var ocrKeepLineBreaks: Bool { didSet { persist(.ocrKeepLineBreaks, ocrKeepLineBreaks) } }
     /// BCP 47 language codes for Vision text recognition, in priority order.
     public var ocrLanguages: [String] { didSet { persist(.ocrLanguages, ocrLanguages) } }
+    /// Keep the system shadow (with transparent surround) on window captures.
+    public var windowShadow: Bool { didSet { persist(.windowShadow, windowShadow) } }
+    /// Fullscreen captures every display as separate files instead of the one under the cursor.
+    public var fullscreenAllDisplays: Bool { didSet { persist(.fullscreenAllDisplays, fullscreenAllDisplays) } }
+    /// Self-timer countdown in seconds.
+    public var selfTimerSeconds: Int { didSet { persist(.selfTimerSeconds, selfTimerSeconds) } }
 
     public init(store: any SettingsStore = UserDefaultsSettingsStore()) {
         self.store = store
@@ -82,6 +92,9 @@ public final class AppSettings {
         colorPalette = Self.load(.colorPalette, from: store) ?? Defaults.colorPalette
         ocrKeepLineBreaks = Self.load(.ocrKeepLineBreaks, from: store) ?? true
         ocrLanguages = Self.load(.ocrLanguages, from: store) ?? Defaults.ocrLanguages
+        windowShadow = Self.load(.windowShadow, from: store) ?? true
+        fullscreenAllDisplays = Self.load(.fullscreenAllDisplays, from: store) ?? false
+        selfTimerSeconds = Self.load(.selfTimerSeconds, from: store) ?? Defaults.selfTimerSeconds
     }
 
     /// After-capture action for a shortcut, falling back to the default.

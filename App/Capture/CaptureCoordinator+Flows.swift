@@ -1,0 +1,173 @@
+import AppKit
+import ScreenCapKit
+
+// One flow per capture kind. Everything here runs on the main actor between awaits.
+extension CaptureCoordinator {
+    func run(_ kind: CaptureKind, action: AfterCaptureAction?) async throws {
+        let geometry = DisplayGeometry.fromCurrentScreens()
+        let windows = (try? await service.shareableWindows()) ?? []
+        let context = frontContext(windows: windows)
+        let flow = Flow(kind: kind, geometry: geometry, context: context, action: action)
+        switch kind {
+        case .fullscreen:
+            try await captureFullscreen(flow)
+        case .previousArea:
+            if let rect = previousArea.rect(validIn: geometry) {
+                await deliver(try await service.captureArea(pointRect: rect), flow)
+            } else {
+                try await select(flow, windows: windows)
+            }
+        case .selfTimer:
+            if let rect = previousArea.rect(validIn: geometry) {
+                try await timedArea(rect, flow)
+            } else {
+                try await select(flow, windows: windows)
+            }
+        case .area, .window, .allInOne, .scrolling, .text:
+            try await select(flow, windows: windows)
+        }
+    }
+
+    func runWindow(ofApp app: String, action: AfterCaptureAction?) async throws {
+        let windows = WindowPicker(windows: try await service.shareableWindows()).windows
+        let match = windows.first {
+            $0.appName?.caseInsensitiveCompare(app) == .orderedSame || $0.bundleIdentifier == app
+        }
+        guard let window = match else {
+            appLog.error("No capturable window for \(app, privacy: .public)")
+            return
+        }
+        let flow = Flow(kind: .window, geometry: DisplayGeometry.fromCurrentScreens(),
+                        context: frontContext(windows: windows), action: action)
+        try await captureWindow(window, flow)
+    }
+
+    /// Per-capture values handed between the steps of a flow.
+    struct Flow {
+        let kind: CaptureKind
+        let geometry: DisplayGeometry
+        let context: FilenameTemplate.Context
+        let action: AfterCaptureAction?
+    }
+
+    private func deliver(_ image: CapturedImage, _ flow: Flow, as kind: CaptureKind? = nil,
+                         context: FilenameTemplate.Context? = nil) async {
+        await deliver(image, kind: kind ?? flow.kind, context: context ?? flow.context, action: flow.action)
+    }
+
+    // MARK: - Selection overlay
+
+    private func select(_ flow: Flow, windows: [ShareableWindow]) async throws {
+        let stills = try await service.captureAllDisplays()
+        let options = SelectionOptions(
+            showsStill: settings.freezeScreen,
+            showsCrosshair: settings.showCrosshair,
+            showsMagnifier: settings.showMagnifier,
+            allInOne: flow.kind == .allInOne,
+            startMode: flow.kind == .window ? .window : .area,
+            previousRect: previousArea.rect(validIn: flow.geometry)
+        )
+        let overlay = SelectionOverlay(stills: stills, geometry: flow.geometry, windows: windows, options: options)
+        switch await overlay.run() {
+        case .cancelled:
+            appLog.info("Selection cancelled")
+        case let .window(window):
+            try await captureWindow(window, flow)
+        case let .area(rect):
+            previousArea.remember(rect)
+            try await captureSelectedArea(rect, stills: stills, flow)
+        case let .allInOne(choice, rect):
+            previousArea.remember(rect)
+            try await runAllInOne(choice, rect: rect, stills: stills, flow)
+        }
+    }
+
+    private func captureWindow(_ window: ShareableWindow, _ flow: Flow) async throws {
+        if flow.kind == .selfTimer {
+            guard await selfTimer.countdown(seconds: settings.selfTimerSeconds, around: window.frame) else { return }
+        }
+        let image = try await service.captureWindow(id: window.id, includeShadow: settings.windowShadow)
+        let context = FilenameTemplate.Context(app: window.appName ?? flow.context.app, window: window.title)
+        await deliver(image, flow, as: .window, context: context)
+    }
+
+    private func captureSelectedArea(_ rect: CGRect, stills: [CapturedImage], _ flow: Flow) async throws {
+        switch flow.kind {
+        case .scrolling:
+            post(.scrollingCaptureRequested, rect: rect)
+        case .text:
+            post(.captureTextRequested, rect: rect)
+        case .selfTimer:
+            try await timedArea(rect, flow)
+        case .area, .window, .fullscreen, .previousArea, .allInOne:
+            await deliver(try await areaImage(rect, stills: stills, geometry: flow.geometry), flow)
+        }
+    }
+
+    private func runAllInOne(_ choice: AllInOneChoice, rect: CGRect, stills: [CapturedImage], _ flow: Flow)
+        async throws {
+        switch choice {
+        case .area, .window:
+            await deliver(try await areaImage(rect, stills: stills, geometry: flow.geometry), flow)
+        case .fullscreen:
+            guard let display = flow.geometry.display(bestFor: rect) else { return }
+            if settings.freezeScreen, let still = stills.first(where: { $0.displayID == display.id }) {
+                await deliver(still, flow, as: .fullscreen)
+            } else {
+                try await Task.sleep(for: Self.overlayHideDelay)
+                await deliver(try await service.captureDisplay(display.id), flow, as: .fullscreen)
+            }
+        case .scrolling:
+            post(.scrollingCaptureRequested, rect: rect)
+        case .text:
+            post(.captureTextRequested, rect: rect)
+        case .timer:
+            try await timedArea(rect, flow)
+        }
+    }
+
+    /// Frozen mode crops the still taken at shortcut time; live mode re-captures after the overlay hides.
+    private func areaImage(_ rect: CGRect, stills: [CapturedImage], geometry: DisplayGeometry) async throws
+        -> CapturedImage {
+        if settings.freezeScreen,
+           let display = geometry.display(bestFor: rect),
+           let still = stills.first(where: { $0.displayID == display.id }),
+           let cropped = still.cropped(toGlobalPoints: rect) {
+            return cropped
+        }
+        try await Task.sleep(for: Self.overlayHideDelay)
+        return try await service.captureArea(pointRect: rect)
+    }
+
+    // MARK: - Other flows
+
+    private func timedArea(_ rect: CGRect, _ flow: Flow) async throws {
+        guard await selfTimer.countdown(seconds: settings.selfTimerSeconds, around: rect) else {
+            appLog.info("Self-timer cancelled")
+            return
+        }
+        try await Task.sleep(for: Self.overlayHideDelay)
+        await deliver(try await service.captureArea(pointRect: rect), flow, as: .selfTimer)
+    }
+
+    /// The display under the cursor, or every display as separate files.
+    private func captureFullscreen(_ flow: Flow) async throws {
+        if settings.fullscreenAllDisplays {
+            for image in try await service.captureAllDisplays() {
+                await deliver(image, flow)
+            }
+            return
+        }
+        let mouse = NSEvent.mouseLocation
+        guard let display = flow.geometry.display(containing: mouse) ?? flow.geometry.primaryDisplay else {
+            throw CaptureError.areaOffScreen(CGRect(origin: mouse, size: .zero))
+        }
+        await deliver(try await service.captureDisplay(display.id), flow)
+    }
+
+    /// Hands a region to a feature another worker owns (scrolling, OCR).
+    private func post(_ name: Notification.Name, rect: CGRect) {
+        appLog.notice("Posting \(name.rawValue, privacy: .public) for \(String(describing: rect), privacy: .public)")
+        NotificationCenter.default.post(name: name, object: self, userInfo: ["rect": NSValue(rect: rect)])
+    }
+}

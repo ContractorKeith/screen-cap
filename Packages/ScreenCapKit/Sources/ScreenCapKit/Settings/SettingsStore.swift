@@ -7,11 +7,12 @@ public protocol SettingsStore: AnyObject {
     func set(_ data: Data?, forKey key: String)
 }
 
-/// Production store: a UserDefaults suite (standard defaults when `suiteName` is nil).
+/// Production store: standard defaults by default. A suite name must not equal the app's
+/// bundle identifier; macOS rejects that and silently drops every write.
 public final class UserDefaultsSettingsStore: SettingsStore {
     private let defaults: UserDefaults
 
-    public init(suiteName: String? = ScreenCapKit.bundleIdentifier) {
+    public init(suiteName: String? = nil) {
         defaults = suiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
     }
 
