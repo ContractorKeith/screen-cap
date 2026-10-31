@@ -26,16 +26,7 @@ for res in "$BIN_DIR"/*.bundle; do
 done
 shopt -u nullglob
 cp App/Resources/Info.plist "$CONTENTS/Info.plist"
-# CFBundleVersion is the build number Sparkle compares (sparkle:version), so it must increase every
-# release: the git commit count. CFBundleShortVersionString comes from ScreenCapKit.version.
-VERSION="$(sed -nE 's/.*static let version = "([^"]+)".*/\1/p' \
-  Packages/ScreenCapKit/Sources/ScreenCapKit/ScreenCapKit.swift)"
-[[ -n "$VERSION" ]] || { echo "Could not read ScreenCapKit.version" >&2; exit 1; }
-BUILD_NUMBER="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || true)}"
-[[ "$BUILD_NUMBER" =~ ^[0-9]+$ && "$BUILD_NUMBER" -gt 1 ]] || {
-  echo "Bad build number '$BUILD_NUMBER' (needs full git history; set BUILD_NUMBER to override)" >&2; exit 1; }
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$CONTENTS/Info.plist"
+scripts/stamp-version.sh "$CONTENTS/Info.plist" # build number and version (#77)
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 
 # Placeholder icon, drawn programmatically (original artwork).

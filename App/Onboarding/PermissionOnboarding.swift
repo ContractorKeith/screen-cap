@@ -52,6 +52,12 @@ enum WelcomePolicy {
         !permissionGranted || !dontShowAgain
     }
 
+    /// Unnotarized builds (#128): each new download is blocked once; macOS 15 removed right-click → Open.
+    static let blockedAppHint = """
+        If macOS blocked the app (or blocks a new version): System Settings → Privacy & Security → \
+        Open Anyway. On macOS 14, right-click ScreenCap → Open.
+        """
+
     /// The three shortcuts the welcome step teaches, in order.
     @MainActor static let mainShortcuts: [ShortcutCatalog.Entry] = ShortcutCatalog.all.filter {
         [.captureArea, .captureWindow, .captureFullscreen].contains($0.name)
@@ -88,6 +94,10 @@ struct PermissionOnboardingView: View {
             Text("macOS may ask you to quit and reopen ScreenCap after you turn it on.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+            Text(WelcomePolicy.blockedAppHint)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
                 Button("Later", action: close)
