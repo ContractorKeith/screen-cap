@@ -1,9 +1,9 @@
 # screen-cap
 
 An open-source macOS screenshot app: capture (area, window, fullscreen, scrolling, timer),
-annotate, OCR, pin and save, from the menu bar with global shortcuts. Its feature set follows
-CleanShot X's screenshot side; screen recording is deliberately later. "Done" for v1 is every
-row marked v1 in the feature matrix in `docs/PLAN.md`.
+annotate, OCR, pin and save, from the menu bar with global shortcuts. Screenshots, editing,
+and saving only; screen recording is deliberately later. "Done" for v1 is every row marked
+v1 in the feature matrix in `docs/PLAN.md`.
 
 ## Status
 M1 in progress: app capture flow (issue #23) — overlays, window picker, shortcuts, save/copy. Last touched 2026-10-31.
@@ -41,7 +41,7 @@ pkill -x ScreenCap                                   # quit a running build
 - Hidden launch options drive captures without key presses (CI smoke tests):
   `build/ScreenCap.app/Contents/MacOS/ScreenCap --capture <area|window|fullscreen|previousArea|selfTimer|allInOne|scrolling|text> [--action save|copy|overlay|annotate|pin] [--window <app>] [--quit]`.
   Launched from Terminal, Screen Recording permission is Terminal's.
-- Original name, icon and UI. Do not copy CleanShot assets, copy or branding.
+- Original name, icon, UI, copy, backgrounds, and file format. Do not copy any other app's assets or branding.
 
 ## Out of Scope
 - Screen recording, GIF, video editor, camera, keystroke and click overlays (later phase).
