@@ -58,7 +58,8 @@ struct MenuModelTests {
         let menu = MenuBuilder.menu(from: AppMenu.entries(actions(recorder)))
         let submenu = try #require(menu.item(withTitle: "Capture")?.submenu)
         #expect(submenu.items.map(\.title) == [
-            "Capture Previous Area", "Self-Timer", "Scrolling Capture", "Capture Text"
+            "Capture Previous Area", "Self-Timer", "Scrolling Capture", "Capture Text", "",
+            "Pin from Clipboard", "Unlock All Pins"
         ])
         let timer = try #require(submenu.item(withTitle: "Self-Timer")?.submenu)
         fire(timer.item(withTitle: "Start"))

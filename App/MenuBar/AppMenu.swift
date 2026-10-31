@@ -14,6 +14,8 @@ enum AppMenu {
         var toggleLaunchAtLogin: @MainActor () -> Void
         var launchAtLoginIsOn: @MainActor () -> Bool
         var quit: @MainActor () -> Void
+        var pinFromClipboard: @MainActor () -> Void = {}
+        var unlockAllPins: @MainActor () -> Void = {}
     }
 
     static func entries(_ actions: Actions) -> [MenuEntry] {
@@ -26,7 +28,10 @@ enum AppMenu {
                 capture("Capture Previous Area", .previousArea, actions),
                 .submenu("Self-Timer", selfTimerEntries(actions)),
                 capture("Scrolling Capture", .scrolling, actions),
-                capture("Capture Text", .text, actions)
+                capture("Capture Text", .text, actions),
+                .separator,
+                .item(MenuAction("Pin from Clipboard", perform: actions.pinFromClipboard)),
+                .item(MenuAction("Unlock All Pins", perform: actions.unlockAllPins))
             ]),
             .item(MenuAction("Hide Overlays", shortcut: .toggleOverlays, isOn: { QuickAccessVisibility.isHidden },
                              perform: post(.toggleOverlaysRequested))),
