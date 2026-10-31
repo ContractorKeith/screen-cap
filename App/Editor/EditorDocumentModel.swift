@@ -111,8 +111,16 @@ final class EditorDocumentModel {
         var next = history.current
         change(&next)
         history.record(next, groupKey: groupKey)
+        // Annotation and background steps share the base bitmap; only crop, rotate, flip and
+        // resize make a new one. Cap how many distinct bitmaps undo can hold.
+        history.limitDistinct(Self.maxUndoBitmaps) { ObjectIdentifier($0.baseImage) }
         didChange()
     }
+
+    /// Most base bitmaps the undo history keeps alive, the current one included. A 5K Retina
+    /// capture is about 58 MB, so this bounds undo to roughly 4 × 58 MB however many image
+    /// edits are made; older image steps (and every step before them) drop off the undo stack.
+    static let maxUndoBitmaps = 4
 
     /// Edits the document only.
     func edit(groupKey: String? = nil, _ change: (inout Document) -> Void) {
@@ -175,7 +183,16 @@ final class EditorDocumentModel {
 
     // MARK: - Saving
 
-    /// Writes a `.screencap` package that reopens with every object editable.
+    /// UserDefaults key: the user has confirmed, once, that saving bakes redactions.
+    static let redactionBakeConfirmedKey = "EditorRedactionBakeConfirmed"
+
+    /// True when this save would flatten blur or pixelate and the user hasn't confirmed it yet.
+    func needsRedactionBakeConfirmation(defaults: UserDefaults = .standard) -> Bool {
+        ProjectFile.containsRedactions(document) && !defaults.bool(forKey: Self.redactionBakeConfirmedKey)
+    }
+
+    /// Writes a `.screencap` package. Objects stay editable, except blur and pixelate (and anything
+    /// beneath them), which `ProjectFile` bakes into `base.png` so the original pixels aren't saved.
     func saveProject(to url: URL) throws {
         let canvas = document.canvasSize
         let previewScale = min(1, Double(ProjectFile.previewMaxPixels) / max(canvas.width, canvas.height, 1))

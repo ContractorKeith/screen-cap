@@ -77,7 +77,10 @@ extension EditorDocumentModel {
     // MARK: - Background
 
     /// Sets or clears the background and refits the canvas. Slider drags pass a group key.
+    /// Auto Balance's per-edge padding survives other edits until `padding` itself changes.
     func setBackground(_ background: Document.Background?, aspect: Double?, groupKey: String? = nil) {
+        var background = background
+        if let old = document.background, background?.padding != old.padding { background?.edgePadding = nil }
         perform(groupKey: groupKey) { snapshot in
             snapshot.document.background = background
             snapshot.backgroundAspect = background == nil ? nil : aspect
@@ -113,14 +116,11 @@ extension EditorDocumentModel {
             var background = snapshot.document.background ?? Self.defaultBackground
             background.padding = balanced.padding
             background.alignment = balanced.alignment
+            // The canvas takes the per-edge padding; padding plus alignment place the image in it.
+            background.edgePadding = balanced.edges
             snapshot.document.background = background
             snapshot.backgroundAspect = nil
-            // The canvas takes the per-edge insets; padding plus alignment place the image in it.
-            let size = snapshot.imageSize, minimum = balanced.padding * 2
-            snapshot.document.canvasSize = CGSize(
-                width: size.width + max(Double(insets.left + insets.right), minimum),
-                height: size.height + max(Double(insets.top + insets.bottom), minimum)
-            )
+            snapshot.refitCanvas()
         }
     }
 

@@ -22,8 +22,11 @@ final class ScrollingCaptureController {
     private var wake: CheckedContinuation<Void, Never>?
     /// When the gap hint, if shown, goes away.
     private var hintUntil: ContinuousClock.Instant?
-    /// `--region` starts the first capture without waiting for Start.
+    /// `--region` or a URL with `start=true` starts the next capture without waiting for Start.
     private var startsImmediately = false
+    /// Auto-scroll for the next capture from a URL (`autoscroll=`); nil uses the launch option or setting.
+    private var autoScrollOverride: Bool?
+    private var requestObserver: NSObjectProtocol?
 
     init(coordinator: CaptureCoordinator, settings: ScrollingSettings = .shared,
          poster: any ScrollEventPosting = SystemScrollEventPoster(),
@@ -43,6 +46,7 @@ final class ScrollingCaptureController {
         coordinator.scrollingHandler = { [controller] rect, context, action in
             await controller.run(region: rect.integral, context: context, action: action)
         }
+        controller.observeRegionRequests()
         return controller
     }
 
@@ -50,8 +54,10 @@ final class ScrollingCaptureController {
 
     func run(region: CGRect, context: FilenameTemplate.Context, action: AfterCaptureAction?) async {
         let startsNow = startsImmediately
+        let autoScroll = autoScrollOverride ?? launch.autoScroll ?? settings.autoScroll
         startsImmediately = false
-        session = ScrollingSession(autoScroll: launch.autoScroll ?? settings.autoScroll,
+        autoScrollOverride = nil
+        session = ScrollingSession(autoScroll: autoScroll,
                                    axis: settings.horizontal ? .horizontal : .vertical)
         session.beginSelection()
         showUI(around: region)
@@ -293,6 +299,41 @@ final class ScrollingCaptureController {
             }
         }) {
             keyMonitors.append(global)
+        }
+    }
+}
+
+// MARK: - URL scheme regions
+
+extension ScrollingCaptureController {
+    /// `screencap://scrolling-capture` with a region posts `.scrollingCaptureRequested`
+    /// (`rect`, `start`, `autoscroll`); see docs/url-scheme.md.
+    fileprivate func observeRegionRequests() {
+        requestObserver = NotificationCenter.default.addObserver(
+            forName: .scrollingCaptureRequested, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let rect = (note.userInfo?[AutomationKey.rect] as? NSValue)?.rectValue else { return }
+            let startNow = note.userInfo?[AutomationKey.start] as? Bool ?? false
+            let autoScroll = note.userInfo?[AutomationKey.autoscroll] as? Bool
+            MainActor.assumeIsolated {
+                self?.start(region: rect, startNow: startNow, autoScroll: autoScroll)
+            }
+        }
+    }
+
+    /// Starts a scrolling capture of a pre-chosen region (global AppKit points), skipping selection.
+    func start(region: CGRect, startNow: Bool, autoScroll: Bool?) {
+        startsImmediately = startNow
+        autoScrollOverride = autoScroll
+        coordinator.scrollingRegion = region
+        guard coordinator.capture(.scrolling) != nil else {
+            // No permission or another capture is running: drop the request instead of leaking it
+            // into the next interactive scrolling capture.
+            appLog.notice("Scrolling capture request ignored: a capture is running or permission is missing")
+            coordinator.scrollingRegion = nil
+            startsImmediately = false
+            autoScrollOverride = nil
+            return
         }
     }
 }

@@ -41,6 +41,10 @@ extension EditorWindowController {
     }
 
     private func writeProject(to url: URL, thenClose: Bool) {
+        if model.needsRedactionBakeConfirmation(), let window {
+            confirmRedactionBake(in: window) { [weak self] in self?.writeProject(to: url, thenClose: thenClose) }
+            return
+        }
         do {
             try model.saveProject(to: url)
             window?.isDocumentEdited = false
@@ -49,6 +53,24 @@ extension EditorWindowController {
             if thenClose { forceClose() }
         } catch {
             present(error)
+        }
+    }
+
+    /// One-time sheet: saving a project flattens blur and pixelate, so they can't be edited later.
+    private func confirmRedactionBake(in window: NSWindow, then save: @escaping @MainActor () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Blur and pixelate will be made permanent"
+        alert.informativeText = "To keep hidden content out of the file, ScreenCap saves blurred and pixelated "
+            + "areas (and anything beneath them) as flattened pixels. The project won't contain the original, "
+            + "so these redactions can't be moved or removed after you reopen it. Other objects stay editable."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { response in
+            MainActor.assumeIsolated {
+                guard response == .alertFirstButtonReturn else { return }
+                UserDefaults.standard.set(true, forKey: EditorDocumentModel.redactionBakeConfirmedKey)
+                save()
+            }
         }
     }
 

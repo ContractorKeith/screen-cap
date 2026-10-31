@@ -101,15 +101,11 @@ final class HistoryViewModel {
         await reload()
     }
 
-    /// Clears `closedAt` and returns the restored records so Quick Access can show them again.
-    func restore(_ ids: Set<UUID>) async -> [CaptureRecord] {
-        guard let store else { return [] }
-        var restored: [CaptureRecord] = []
-        for record in records where ids.contains(record.id) && record.closedAt != nil {
-            do { restored.append(try await store.restore(id: record.id)) } catch { log("restore", error) }
-        }
-        await reload()
-        return restored
+    /// The closed records among `ids`, for Restore to Quick Access. Doesn't touch the store:
+    /// Quick Access clears `closedAt` once the panel is on screen, so a failed restore stays in
+    /// Restore Recently Closed.
+    func restorable(_ ids: Set<UUID>) -> [CaptureRecord] {
+        records.filter { ids.contains($0.id) && $0.closedAt != nil }
     }
 
     /// Deletes everything older than the retention setting.

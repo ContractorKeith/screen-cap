@@ -1,7 +1,7 @@
 import Foundation
 import ScreenCapKit
 
-/// One finished capture, already scaled to the output scale setting.
+/// One finished capture at full resolution. The output scale is applied only when saving or copying.
 struct CaptureResult: Sendable {
     let image: CapturedImage
     let kind: CaptureKind
@@ -9,6 +9,8 @@ struct CaptureResult: Sendable {
     let context: FilenameTemplate.Context
     /// The history record, if the history write succeeded.
     var historyRecordID: UUID?
+    /// The history copy's file, offered when a save fails.
+    var historyFileURL: URL?
 }
 
 /// Receives captures whose after-capture action needs UI: `.overlay`, `.annotate`, `.pin`.
@@ -34,6 +36,7 @@ final class SavingCaptureSink: CaptureSink {
             appLog.notice("No \(action.rawValue, privacy: .public) UI yet; saved \(url.path, privacy: .public)")
         } catch {
             appLog.error("Save failed: \(error.localizedDescription, privacy: .public)")
+            CaptureFailureHUD.showOutputFailed(.save, error: error, result: result, output: output)
         }
     }
 }

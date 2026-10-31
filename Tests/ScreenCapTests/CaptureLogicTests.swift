@@ -9,8 +9,11 @@ struct CaptureLogicTests {
         let parsed = LaunchArguments.parse(["ScreenCap", "--capture", "fullscreen", "--action", "save", "--quit"])
         #expect(parsed == LaunchArguments(capture: .fullscreen, action: .save, quitAfterCapture: true))
         #expect(LaunchArguments.parse(["ScreenCap"]) == LaunchArguments())
-        let junk = LaunchArguments.parse(["ScreenCap", "-NSDocumentRevisionsDebugMode", "YES", "--capture", "bogus"])
-        #expect(junk == LaunchArguments())
+        let system = LaunchArguments.parse(["ScreenCap", "-NSDocumentRevisionsDebugMode", "YES"])
+        #expect(system == LaunchArguments())
+        let junk = LaunchArguments.parse(["ScreenCap", "--capture", "bogus"])
+        #expect(junk.capture == nil)
+        #expect(junk.problems == ["--capture needs a kind, got bogus"])
         #expect(LaunchArguments.parse(["ScreenCap", "--capture"]).capture == nil)
         let window = LaunchArguments.parse(["ScreenCap", "--capture", "window", "--window", "Terminal"])
         #expect(window.capture == .window)
@@ -57,15 +60,15 @@ struct CaptureLogicTests {
         let image = try #require(Self.solidImage(width: 200, height: 100))
         let retina = CapturedImage(cgImage: image, scale: 2, pointRect: CGRect(x: 0, y: 0, width: 100, height: 50),
                                    displayID: 1)
-        let standard = OutputScaler.scaled(retina, to: .standard)
+        let standard = try OutputScaler.scaled(retina, to: .standard)
         #expect(standard.cgImage.width == 100)
         #expect(standard.cgImage.height == 50)
         #expect(standard.scale == 1)
         #expect(standard.pointRect == retina.pointRect)
         // Never upsamples, and 2x stays untouched.
-        #expect(OutputScaler.scaled(retina, to: .retina).cgImage.width == 200)
+        #expect(try OutputScaler.scaled(retina, to: .retina).cgImage.width == 200)
         let oneX = CapturedImage(cgImage: image, scale: 1, pointRect: .zero, displayID: nil)
-        #expect(OutputScaler.scaled(oneX, to: .retina).cgImage.width == 200)
+        #expect(try OutputScaler.scaled(oneX, to: .retina).cgImage.width == 200)
     }
 
     @Test @MainActor func magnifierReadsTheCenterPixel() throws {

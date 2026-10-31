@@ -20,6 +20,14 @@ enum CaptureKind: String, CaseIterable, Sendable {
         }
     }
 
+    /// Whether a selection for this kind becomes the new "previous area". OCR and scrolling regions don't.
+    var remembersArea: Bool {
+        switch self {
+        case .text, .scrolling: false
+        case .area, .window, .fullscreen, .previousArea, .selfTimer, .allInOne: true
+        }
+    }
+
     /// Value for the `{kind}` filename token.
     var filenameKind: FilenameTemplate.Kind {
         switch self {

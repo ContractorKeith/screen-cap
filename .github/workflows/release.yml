@@ -30,7 +30,7 @@ jobs:
 
       - name: Test
         timeout-minutes: 15
-        run: swift test
+        run: swift test --no-parallel
 
       # --- Developer ID signing (enable once there is an Apple Developer account) ---
       # Imports the certificate into a temporary keychain; bundle.sh then signs with it

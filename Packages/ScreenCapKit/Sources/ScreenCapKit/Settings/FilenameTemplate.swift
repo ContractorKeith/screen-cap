@@ -24,7 +24,7 @@ public struct FilenameTemplate: Sendable {
         }
     }
 
-    /// Max filename length in characters, excluding the extension.
+    /// Max filename length in UTF-8 bytes, excluding the extension. APFS allows 255 bytes per name.
     public static let maxLength = 200
     /// Used when the template renders to nothing.
     public static let fallbackName = "ScreenCap"
@@ -59,24 +59,55 @@ public struct FilenameTemplate: Sendable {
 
     /// First URL in `folder` that `fileExists` reports free. With `{counter}` in the template the
     /// counter increments; otherwise ` 2`, ` 3`, ... is appended before the extension.
+    ///
+    /// Only a probe: another writer can take the name before you write. Writers that suspend
+    /// between choosing a name and writing should use `reserveUniqueURL(in:context:)`.
     public func uniqueURL(
         in folder: URL,
         context: Context = Context(),
         fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
     ) -> URL {
+        let candidates = candidateURLs(in: folder, context: context)
+        for url in candidates.names where !fileExists(url) { return url }
+        return candidates.fallback
+    }
+
+    /// Claims a free name by creating an empty file there with `O_EXCL`, so two concurrent saves
+    /// can never pick the same name. Write the real data over the returned URL afterwards
+    /// (an `.atomic` write replaces the placeholder); remove it if the write fails.
+    public func reserveUniqueURL(in folder: URL, context: Context = Context()) throws -> URL {
+        let candidates = candidateURLs(in: folder, context: context)
+        for url in candidates.names where try Self.createExclusively(url) { return url }
+        guard try Self.createExclusively(candidates.fallback) else {
+            throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: folder.path])
+        }
+        return candidates.fallback
+    }
+
+    /// Creates an empty file only if nothing exists at `url` (`O_CREAT | O_EXCL`). False if taken.
+    private static func createExclusively(_ url: URL) throws -> Bool {
+        do {
+            try Data().write(to: url, options: .withoutOverwriting)
+            return true
+        } catch CocoaError.fileWriteFileExists {
+            return false
+        }
+    }
+
+    /// Names in the order they are tried, plus a UUID name for a pathological folder.
+    private func candidateURLs(in folder: URL, context: Context) -> (names: LazyMapSequence<ClosedRange<Int>, URL>,
+                                                                       fallback: URL) {
         let date = clock()
         let usesCounter = template.contains("{counter}")
         let baseStem = render(context: context, date: date, counter: 1)
-
-        for attempt in 1...Self.maxAttempts {
+        let names = (1...Self.maxAttempts).lazy.map { attempt in
             let name = usesCounter
                 ? filename(stem: render(context: context, date: date, counter: attempt), suffix: "")
                 : filename(stem: baseStem, suffix: attempt == 1 ? "" : " \(attempt)")
-            let url = folder.appendingPathComponent(name, isDirectory: false)
-            if !fileExists(url) { return url }
+            return folder.appendingPathComponent(name, isDirectory: false)
         }
-        // Pathological folder: fall back to a name that can't collide.
-        return folder.appendingPathComponent(filename(stem: baseStem, suffix: " \(UUID().uuidString)"))
+        let fallback = folder.appendingPathComponent(filename(stem: baseStem, suffix: " \(UUID().uuidString)"))
+        return (names, fallback)
     }
 
     // MARK: - Rendering
@@ -127,12 +158,26 @@ public struct FilenameTemplate: Sendable {
         return cleaned
     }
 
-    /// Truncates the stem so stem + suffix fits `maxLength`, then adds the extension.
+    /// Truncates the stem so stem + suffix fits `maxLength` UTF-8 bytes, then adds the extension.
     private func filename(stem: String, suffix: String) -> String {
         let base = stem.isEmpty ? Self.fallbackName : stem
-        let room = max(Self.maxLength - suffix.count, 1)
-        let truncated = String(base.prefix(room)).trimmingCharacters(in: .whitespaces)
+        let room = max(Self.maxLength - suffix.utf8.count, 1)
+        let truncated = Self.prefix(base, maxBytes: room).trimmingCharacters(in: .whitespaces)
         return "\(truncated)\(suffix).\(format.fileExtension)"
+    }
+
+    /// The longest prefix of whole characters (grapheme clusters) within `maxBytes` UTF-8 bytes.
+    static func prefix(_ string: String, maxBytes: Int) -> String {
+        guard string.utf8.count > maxBytes else { return string }
+        var bytes = 0
+        var end = string.startIndex
+        for index in string.indices {
+            let next = string.index(after: index)
+            bytes += string[index..<next].utf8.count
+            if bytes > maxBytes { break }
+            end = next
+        }
+        return String(string[..<end])
     }
 
     private func stamp(_ date: Date, _ pattern: String) -> String {

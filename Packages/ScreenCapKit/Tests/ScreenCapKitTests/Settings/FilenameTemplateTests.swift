@@ -85,6 +85,38 @@ struct FilenameTemplateTests {
         #expect(name == String(repeating: "a", count: 200) + ".png")
     }
 
+    /// 200 CJK characters are 600 UTF-8 bytes, over APFS's 255-byte name limit (#58).
+    @Test func truncatesCJKByBytes() {
+        let name = make(String(repeating: "日", count: 200)).filename()
+        let stem = String(name.dropLast(4))
+        #expect(stem.utf8.count <= FilenameTemplate.maxLength)
+        #expect(stem == String(repeating: "日", count: 66)) // 66 × 3 = 198 bytes; a 67th would be 201
+        #expect(name.utf8.count <= 255)
+    }
+
+    /// A skin-toned emoji is one 8-byte grapheme of two scalars; truncation never splits it.
+    @Test func truncationKeepsWholeGraphemes() {
+        let thumb = "👍🏽"
+        let name = make("a" + String(repeating: thumb, count: 40)).filename()
+        let stem = String(name.dropLast(4))
+        #expect(stem == "a" + String(repeating: thumb, count: 24)) // 1 + 24 × 8 = 193 bytes; 25 would be 201
+        // A 25-byte family emoji (ZWJ sequence) is kept whole or dropped whole.
+        let family = "👨‍👩‍👧‍👦"
+        #expect(FilenameTemplate.prefix("a" + family, maxBytes: 25) == "a")
+        #expect(FilenameTemplate.prefix("a" + family, maxBytes: 26) == "a" + family)
+        #expect(FilenameTemplate.prefix("é👍x", maxBytes: 5) == "é")
+        #expect(FilenameTemplate.prefix("short", maxBytes: 200) == "short")
+    }
+
+    @Test func collisionSuffixFitsByteLimit() {
+        let template = make(String(repeating: "日", count: 200))
+        let first = template.filename()
+        let url = template.uniqueURL(in: Self.folder) { $0.lastPathComponent == first }
+        let stem = url.deletingPathExtension().lastPathComponent
+        #expect(stem.utf8.count <= FilenameTemplate.maxLength)
+        #expect(stem.hasSuffix("日 2"))
+    }
+
     @Test func truncationKeepsCollisionSuffixWithinLimit() {
         let template = make(String(repeating: "b", count: 300))
         let first = template.filename()
@@ -121,5 +153,35 @@ struct FilenameTemplateTests {
         let template = make("Shot")
         try Data().write(to: folder.appendingPathComponent("Shot.png"))
         #expect(template.uniqueURL(in: folder).lastPathComponent == "Shot 2.png")
+    }
+
+    @Test func reserveClaimsDistinctNamesUnderConcurrency() async throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let template = make(AppSettings.Defaults.filenameTemplate)
+        let urls = try await withThrowingTaskGroup(of: URL.self) { group in
+            for _ in 0..<8 {
+                group.addTask { try template.reserveUniqueURL(in: folder) }
+            }
+            return try await group.reduce(into: [URL]()) { $0.append($1) }
+        }
+        #expect(Set(urls).count == 8)
+        let names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        #expect(names.count == 8)
+        #expect(names.contains("ScreenCap 2026-03-07 at 09.05.04.png"))
+        #expect(names.contains("ScreenCap 2026-03-07 at 09.05.04 2.png"))
+    }
+
+    @Test func reserveSkipsExistingFiles() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Data("keep".utf8).write(to: folder.appendingPathComponent("Shot.png"))
+        let url = try make("Shot").reserveUniqueURL(in: folder)
+        #expect(url.lastPathComponent == "Shot 2.png")
+        #expect(try Data(contentsOf: folder.appendingPathComponent("Shot.png")) == Data("keep".utf8))
     }
 }

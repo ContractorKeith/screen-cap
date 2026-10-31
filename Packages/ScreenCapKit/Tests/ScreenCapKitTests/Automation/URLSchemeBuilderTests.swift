@@ -34,8 +34,15 @@ struct URLSchemeBuilderTests {
         .hideDesktopIcons,
         .showDesktopIcons,
         .openSettings(tab: nil),
-        .openSettings(tab: .quickAccess)
+        .openSettings(tab: .quickAccess),
+        .openSettings(tab: .scrolling),
+        .pin(file: reserved),
+        .captureText(source: .file(reserved), lineBreaks: false),
+        .addQuickAccessOverlay(file: reserved)
     ]
+
+    /// Query delimiters and escapes in a path (#61).
+    static let reserved = URL(fileURLWithPath: "/Users/me/a&b=c+d#e%f.png")
 
     @Test(arguments: commands)
     func roundTrips(_ command: AutomationCommand) throws {
@@ -48,6 +55,12 @@ struct URLSchemeBuilderTests {
         #expect(URLSchemeBuilder.url(for: .captureArea(region: Self.region, action: .pin)).absoluteString
             == "screencap://capture-area?x=10&y=20.25&width=300&height=200&display=2&action=pin")
         #expect(URLSchemeBuilder.url(for: .openHistory).absoluteString == "screencap://open-history")
+    }
+
+    @Test func encodesQueryDelimitersInValues() throws {
+        let url = URLSchemeBuilder.url(for: .pin(file: Self.reserved))
+        #expect(url.absoluteString == "screencap://pin?filepath=/Users/me/a%26b%3Dc%2Bd%23e%25f.png")
+        #expect(try schemeStubParser.parse(url) == .pin(file: Self.reserved))
     }
 }
 
