@@ -14,6 +14,11 @@ final class CaptureCoordinator {
     let service: CaptureService
     let previousArea: PreviousArea
     let selfTimer = SelfTimer()
+    /// Runs scrolling capture over a selected region (App/Scrolling); it delivers through `deliver`.
+    /// Nil posts `.scrollingCaptureRequested` instead.
+    var scrollingHandler: (@MainActor (CGRect, FilenameTemplate.Context, AfterCaptureAction?) async -> Void)?
+    /// Region for the next scrolling capture, skipping the selection overlay (`--region`). Used once.
+    var scrollingRegion: CGRect?
     private let history: HistoryStore?
     private let hasPermission: () -> Bool
     private let showOnboarding: () -> Void

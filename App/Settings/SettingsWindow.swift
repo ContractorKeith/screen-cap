@@ -12,6 +12,7 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             ShortcutsSettingsPane()
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
+            ScrollingSettingsPane(settings: .shared).tabItem { Label("Scrolling", systemImage: "scroll") }
         }
         .frame(width: 520, height: 560)
     }
