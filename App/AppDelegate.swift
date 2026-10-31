@@ -70,6 +70,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Unsaved editor windows ask Save / Don't Save / Cancel first (#73).
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let editor = sinkRouter.annotate as? EditorCoordinator else { return .terminateNow }
+        return editor.reviewUnsavedBeforeQuit { sender.reply(toApplicationShouldTerminate: $0) }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         desktopIcons.show()
     }

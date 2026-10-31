@@ -46,6 +46,9 @@ final class EditorDocumentModel {
 
     /// Filename tokens for Save to Desktop.
     var filenameContext = FilenameTemplate.Context()
+    /// Text-line boxes Vision found in `baseImage`, for automatic redaction flags (#74).
+    var detectedText: DetectedText?
+    @ObservationIgnored var textDetection: Task<[CGRect], Never>?
     @ObservationIgnored let renderer = Renderer()
     /// Called after every change, for AppKit views that don't use Observation.
     @ObservationIgnored var onChange: (() -> Void)?
@@ -186,18 +189,20 @@ final class EditorDocumentModel {
     /// UserDefaults key: the user has confirmed, once, that saving bakes redactions.
     static let redactionBakeConfirmedKey = "EditorRedactionBakeConfirmed"
 
-    /// True when this save would flatten blur or pixelate and the user hasn't confirmed it yet.
+    /// True when this save would flatten redactions and the user hasn't confirmed it yet.
     func needsRedactionBakeConfirmation(defaults: UserDefaults = .standard) -> Bool {
-        ProjectFile.containsRedactions(document) && !defaults.bool(forKey: Self.redactionBakeConfirmedKey)
+        ProjectFile.containsRedactions(documentForSave) && !defaults.bool(forKey: Self.redactionBakeConfirmedKey)
     }
 
-    /// Writes a `.screencap` package. Objects stay editable, except blur and pixelate (and anything
-    /// beneath them), which `ProjectFile` bakes into `base.png` so the original pixels aren't saved.
+    /// Writes a `.screencap` package. Objects stay editable, except redactions (blur, pixelate and
+    /// shapes used as redactions) and anything beneath them, which `ProjectFile` bakes into
+    /// `base.png` so the original pixels aren't saved. Await `detectedTextLines()` first so
+    /// automatic redaction flags resolve against the image's text.
     func saveProject(to url: URL) throws {
         let canvas = document.canvasSize
         let previewScale = min(1, Double(ProjectFile.previewMaxPixels) / max(canvas.width, canvas.height, 1))
         let preview = try? renderedImage(scale: previewScale)
-        try ProjectFile.write(document, baseImage: baseImage, layers: snapshot.referencedLayers,
+        try ProjectFile.write(documentForSave, baseImage: baseImage, layers: snapshot.referencedLayers,
                               preview: preview, to: url)
         markSaved(to: url)
     }

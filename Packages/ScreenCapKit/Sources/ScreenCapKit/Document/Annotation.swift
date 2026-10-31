@@ -10,12 +10,16 @@ public struct Annotation: Sendable, Equatable, Identifiable, Codable {
     public var zIndex: Int
     public var style: Style
     public var kind: Kind
+    /// "Use as redaction": true bakes the object into `base.png` on save, false keeps it editable,
+    /// nil lets the editor decide (opaque and over detected text). See `AnnotationRedaction.swift`.
+    public var redaction: Bool?
 
-    public init(id: UUID = UUID(), zIndex: Int = 0, style: Style = Style(), kind: Kind) {
+    public init(id: UUID = UUID(), zIndex: Int = 0, style: Style = Style(), kind: Kind, redaction: Bool? = nil) {
         self.id = id
         self.zIndex = zIndex
         self.style = style
         self.kind = kind
+        self.redaction = redaction
     }
 
     /// Style shared by every kind. Kinds that don't use a field ignore it.
