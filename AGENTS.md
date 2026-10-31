@@ -19,7 +19,7 @@ per rebuild, so re-grant after `make clean`.
 ```bash
 make build        # swift build (debug)
 make test         # swift test; adds Swift Testing paths when only Command Line Tools are active
-make bundle       # scripts/bundle.sh -> build/ScreenCap.app (release, ad-hoc signed, icon)
+make bundle       # scripts/bundle.sh -> build/ScreenCap.app (release, ad-hoc signed, icon, build number)
 make run          # bundle, then relaunch build/ScreenCap.app
 make dmg          # bundle, then dist/ScreenCap-<version>.dmg (version from ScreenCapKit.version)
 make appcast      # Sparkle appcast for dist/ (needs SUPublicEDKey; see scripts/appcast.sh)
@@ -47,6 +47,11 @@ pkill -x ScreenCap                                   # quit a running build
 - Hidden launch options drive captures without key presses (CI smoke tests):
   `build/ScreenCap.app/Contents/MacOS/ScreenCap --capture <area|window|fullscreen|previousArea|selfTimer|allInOne|scrolling|text> [--action save|copy|overlay|annotate|pin] [--window <app>] [--quit]`.
   Launched from Terminal, Screen Recording permission is Terminal's.
+- Build number: `bundle.sh` stamps `CFBundleVersion` with `git rev-list --count HEAD` (override with
+  `BUILD_NUMBER`) and `CFBundleShortVersionString` from `ScreenCapKit.version`. Sparkle compares
+  `CFBundleVersion`, so the source plist's `1` must never ship; `scripts/check-bundle.sh` fails the
+  bundle if it does. Needs full git history (CI checks out with `fetch-depth: 0`). CI runs
+  `make bundle`, the check and a `--capture bogus --quit` launch (exit 3) on every PR.
 - Releases: bump `ScreenCapKit.version` and `CFBundleShortVersionString` together (dmg.sh and a
   test fail on mismatch), update CHANGELOG.md, push an annotated `v<version>` tag; release.yml
   builds the DMG and the GitHub Release. Sparkle stays off until `SUPublicEDKey` replaces the

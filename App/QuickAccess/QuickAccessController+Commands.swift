@@ -65,22 +65,33 @@ extension QuickAccessController {
         }
     }
 
-    /// Saves once; later calls return the existing file.
+    /// Saves once; later calls return the existing file. A save already running is shared, and
+    /// the Save button is off until it finishes (#78).
     @discardableResult
     private func save(_ item: QuickAccessItem) async -> URL? {
         if let url = item.savedURL { return url }
-        do {
-            let url = try await output.save(item.result)
-            item.savedURL = url
-            item.savedBytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
-            item.refreshInfo()
-            appLog.notice("Saved \(url.path, privacy: .public)")
-            return url
-        } catch {
-            item.flash("Save failed")
-            appLog.error("Save failed: \(error.localizedDescription, privacy: .public)")
-            return nil
+        let key = saveKey(item)
+        let toolbar = item.panel.thumbnail.toolbar
+        toolbar.setEnabled(false, for: .save)
+        defer { if !saveGate.isSaving(key) { toolbar.setEnabled(true, for: .save) } }
+        return await saveGate.save(key) { [output] in
+            do {
+                let url = try await output.save(item.result)
+                item.savedURL = url
+                item.savedBytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+                item.refreshInfo()
+                appLog.notice("Saved \(url.path, privacy: .public)")
+                return url
+            } catch {
+                item.flash("Save failed")
+                appLog.error("Save failed: \(error.localizedDescription, privacy: .public)")
+                return nil
+            }
         }
+    }
+
+    func saveKey(_ item: QuickAccessItem) -> QuickAccessSaveKey {
+        item.result.historyRecordID.map(QuickAccessSaveKey.record) ?? .panel(ObjectIdentifier(item))
     }
 
     /// Saves first if needed, then selects the file in Finder.
@@ -95,7 +106,9 @@ extension QuickAccessController {
         if let id = item.result.historyRecordID, let history {
             _ = try? await history.delete(id: id)
         }
-        if let url = item.savedURL {
+        // A save still running lands after the panel is gone; wait for it so its file is trashed too.
+        let pending = await saveGate.pending(saveKey(item))
+        if let url = item.savedURL ?? pending {
             try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
         }
     }

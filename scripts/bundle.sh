@@ -19,6 +19,16 @@ cp "$BIN_DIR/ScreenCap" "$CONTENTS/MacOS/ScreenCap"
 ditto "$BIN_DIR/Sparkle.framework" "$CONTENTS/Frameworks/Sparkle.framework"
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$CONTENTS/MacOS/ScreenCap"
 cp App/Resources/Info.plist "$CONTENTS/Info.plist"
+# CFBundleVersion is the build number Sparkle compares (sparkle:version), so it must increase every
+# release: the git commit count. CFBundleShortVersionString comes from ScreenCapKit.version.
+VERSION="$(sed -nE 's/.*static let version = "([^"]+)".*/\1/p' \
+  Packages/ScreenCapKit/Sources/ScreenCapKit/ScreenCapKit.swift)"
+[[ -n "$VERSION" ]] || { echo "Could not read ScreenCapKit.version" >&2; exit 1; }
+BUILD_NUMBER="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || true)}"
+[[ "$BUILD_NUMBER" =~ ^[0-9]+$ && "$BUILD_NUMBER" -gt 1 ]] || {
+  echo "Bad build number '$BUILD_NUMBER' (needs full git history; set BUILD_NUMBER to override)" >&2; exit 1; }
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$CONTENTS/Info.plist"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 
 # Placeholder icon, drawn programmatically (original artwork).
@@ -36,4 +46,5 @@ else
   codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
 fi
 codesign --verify --verbose=1 "$APP"
+scripts/check-bundle.sh "$APP"
 echo "Built $ROOT/$APP"
