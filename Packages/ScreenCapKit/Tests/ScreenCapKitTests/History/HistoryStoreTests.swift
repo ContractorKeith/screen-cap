@@ -207,3 +207,58 @@ struct HistoryStoreTests {
         await #expect(throws: HistoryError.recordNotFound(id)) { try await store.markClosed(id: id) }
     }
 }
+
+/// #86: retention is enforced while the store stays open, not only at launch.
+@Suite("HistoryStore live retention")
+struct HistoryRetentionTests {
+    private let fileManager = FileManager.default
+
+    @Test func expiredClosedRecordIsPurgedAndNeverRestored() async throws {
+        let dir = try HistoryFixtures.tempDirectory()
+        defer { try? fileManager.removeItem(at: dir) }
+        let clock = TestClock()
+        let store = try HistoryStore(directory: dir, retentionDays: 1, now: clock.function)
+        let record = try await store.add(image: HistoryFixtures.image(width: 10, height: 10), kind: .area)
+        try await store.markClosed(id: record.id)
+        #expect(await store.recentlyClosed().map(\.id) == [record.id])
+
+        clock.advance(seconds: 2 * 86_400)
+
+        #expect(await store.recentlyClosed().isEmpty)
+        #expect(await store.record(id: record.id) == nil)
+        #expect(await store.records().isEmpty)
+        #expect(!fileManager.fileExists(atPath: record.fileURL.path))
+        #expect(!fileManager.fileExists(atPath: record.thumbnailURL.path))
+        let reopened = try HistoryStore(directory: dir, retentionDays: nil, now: clock.function)
+        #expect(await reopened.records().isEmpty)
+    }
+
+    @Test func purgeExpiredRemovesFilesAndIndex() async throws {
+        let dir = try HistoryFixtures.tempDirectory()
+        defer { try? fileManager.removeItem(at: dir) }
+        let clock = TestClock()
+        let store = try HistoryStore(directory: dir, retentionDays: 1, now: clock.function)
+        let old = try await store.add(image: HistoryFixtures.image(width: 10, height: 10), kind: .area)
+        clock.advance(seconds: 86_400 + 60)
+        let fresh = try await store.add(image: HistoryFixtures.image(width: 10, height: 10), kind: .area)
+
+        #expect(try await store.purgeExpired() == [old.id])
+        #expect(!fileManager.fileExists(atPath: old.fileURL.path))
+        #expect(fileManager.fileExists(atPath: fresh.fileURL.path))
+        let reopened = try HistoryStore(directory: dir, retentionDays: nil, now: clock.function)
+        #expect(await reopened.records().map(\.id) == [fresh.id])
+    }
+
+    @Test func shorteningRetentionPurgesImmediately() async throws {
+        let dir = try HistoryFixtures.tempDirectory()
+        defer { try? fileManager.removeItem(at: dir) }
+        let clock = TestClock()
+        let store = try HistoryStore(directory: dir, retentionDays: 30, now: clock.function)
+        let record = try await store.add(image: HistoryFixtures.image(width: 10, height: 10), kind: .area)
+        clock.advance(seconds: 3 * 86_400)
+        #expect(try await store.setRetention(days: 7).isEmpty)
+        #expect(try await store.setRetention(days: 1) == [record.id])
+        #expect(!fileManager.fileExists(atPath: record.fileURL.path))
+        #expect(await store.retentionDays == 1)
+    }
+}

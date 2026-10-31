@@ -24,6 +24,8 @@ public actor HistoryStore {
     public nonisolated let directory: URL
     private let now: @Sendable () -> Date
     private var index: [CaptureRecord]
+    /// Days to keep; nil keeps everything. Reads purge anything older first (#86).
+    public private(set) var retentionDays: Int?
 
     /// Opens (or creates) the store, rebuilding a corrupt index and purging records older
     /// than `retentionDays`. Pass `retentionDays: nil` to skip the auto-purge.
@@ -46,6 +48,7 @@ public actor HistoryStore {
         self.directory = directory
         self.now = now
         self.index = records
+        self.retentionDays = retentionDays
     }
 
     // MARK: - Adding
@@ -80,12 +83,14 @@ public actor HistoryStore {
     // MARK: - Reading
 
     public func record(id: UUID) -> CaptureRecord? {
-        index.first { $0.id == id }
+        purgeExpiredQuietly()
+        return index.first { $0.id == id }
     }
 
     /// Records newest first, optionally limited to one kind and to a case-insensitive
     /// search over OCR text, app name and window title. A blank query matches everything.
     public func records(filter kind: CaptureKind? = nil, query: String? = nil) -> [CaptureRecord] {
+        purgeExpiredQuietly()
         let trimmed = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return index
             .filter { !$0.isDeleted }
@@ -96,7 +101,8 @@ public actor HistoryStore {
 
     /// Captures whose Quick Access overlay was closed, most recently closed first.
     public func recentlyClosed(limit: Int = 10) -> [CaptureRecord] {
-        Array(
+        purgeExpiredQuietly()
+        return Array(
             index
                 .filter { $0.closedAt != nil && !$0.isDeleted }
                 .sorted { ($0.closedAt ?? .distantPast) > ($1.closedAt ?? .distantPast) }
@@ -152,7 +158,32 @@ public actor HistoryStore {
         return expired.map(\.id)
     }
 
+    /// Changes the retention window and purges right away.
+    @discardableResult
+    public func setRetention(days: Int?) throws -> [UUID] {
+        retentionDays = days
+        return try purgeExpired()
+    }
+
+    /// Deletes records older than `retentionDays` (files and index). Run periodically while the
+    /// app stays open; reads also call it so expired captures never resurface.
+    @discardableResult
+    public func purgeExpired() throws -> [UUID] {
+        guard let retentionDays else { return [] }
+        return try purge(olderThan: retentionDays)
+    }
+
     // MARK: - Private
+
+    private func purgeExpiredQuietly() {
+        do { try purgeExpired() } catch {
+            // The index write failed; still hide what's expired so it can't be restored.
+            if let retentionDays {
+                let cutoff = Self.cutoff(days: retentionDays, now: now())
+                index.removeAll { $0.createdAt < cutoff }
+            }
+        }
+    }
 
     private func update(_ id: UUID, _ change: (inout CaptureRecord) -> Void) throws -> CaptureRecord {
         guard let position = index.firstIndex(where: { $0.id == id }) else { throw HistoryError.recordNotFound(id) }

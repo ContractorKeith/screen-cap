@@ -10,6 +10,12 @@ struct WallpaperSettingsPane: View {
     var body: some View {
         Form {
             Section {
+                Toggle("Add background to window captures", isOn: $settings.windowBackground)
+            } footer: {
+                Text("Window captures are placed on this background with the padding below.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
                 Picker("Background", selection: $settings.wallpaper.style) {
                     Text("Desktop picture").tag(WallpaperOptions.Style.desktop)
                     Text("Solid color").tag(WallpaperOptions.Style.solid)

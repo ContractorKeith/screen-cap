@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var sinkRouter = CaptureSinkRouter(fallback: SavingCaptureSink(output: coordinator.output))
     private var shortcuts: ShortcutController?
     private var menuBar: MenuBarController?
+    private var historyRetention: HistoryRetention?
 
     init(launch: LaunchArguments) {
         self.launch = launch
@@ -119,6 +120,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sinkRouter.annotate = EditorCoordinator.install(settings: settings)
         settingsWindow.history = history // Screenshots, Wallpaper, Advanced, About panes (#28)
         _ = historyWindow // History window, opens on .openHistoryRequested (#28)
+        historyRetention = history.map { HistoryRetention(store: $0, settings: settings) } // Live purge (#86)
+        historyRetention?.start()
         coordinator.desktopIcons = desktopIcons // Hide desktop icons while capturing (#28)
         ScrollingCaptureController.install(on: coordinator)
         sinkRouter.pin = pins

@@ -43,3 +43,49 @@ struct SwipeTracker: Equatable {
         SwipeClassifier.action(fingerDX: dx, fingerDY: dy, corner: corner)
     }
 }
+
+/// Turns one scroll event's phases into swipe steps (#88). Only a gesture that ends normally
+/// (`.ended`) is handed on for a decision; a cancelled one is discarded so the panel snaps back.
+/// Momentum events (after the fingers lift) and plain mouse wheels never move or commit.
+struct SwipeGesture {
+    /// The parts of an `NSEvent` the gesture reads, so tests can feed synthetic sequences.
+    struct Phase: OptionSet {
+        let rawValue: Int
+        static let began = Phase(rawValue: 1 << 0)
+        static let changed = Phase(rawValue: 1 << 1)
+        static let ended = Phase(rawValue: 1 << 2)
+        static let cancelled = Phase(rawValue: 1 << 3)
+        static let mayBegin = Phase(rawValue: 1 << 4)
+    }
+
+    enum Step: Equatable {
+        /// Finger travel so far, for the panel to follow.
+        case moved(CGFloat)
+        /// Finished normally; the tracker decides save, dismiss or nothing.
+        case ended(SwipeTracker)
+        /// Cancelled by the system: restore the panel, do nothing else.
+        case cancelled
+    }
+
+    private var tracker: SwipeTracker?
+
+    /// Feeds one event. `phase` empty = not a gesture (mouse wheel); `isMomentum` = momentum phase.
+    /// Deltas are finger movement (already corrected for natural scrolling).
+    mutating func handle(phase: Phase, isMomentum: Bool, dx: CGFloat, dy: CGFloat) -> [Step] {
+        guard !isMomentum, !phase.isEmpty else { return [] }
+        var steps: [Step] = []
+        if phase.contains(.began) || tracker == nil { tracker = SwipeTracker() }
+        if phase.contains(.changed) {
+            tracker?.add(dx: dx, dy: dy)
+            steps.append(.moved(tracker?.dx ?? 0))
+        }
+        if phase.contains(.cancelled) {
+            tracker = nil
+            steps.append(.cancelled)
+        } else if phase.contains(.ended), let finished = tracker {
+            tracker = nil
+            steps.append(.ended(finished))
+        }
+        return steps
+    }
+}
