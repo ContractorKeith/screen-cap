@@ -11,11 +11,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settings = AppSettings()
     private let onboarding = PermissionOnboardingController()
     private lazy var settingsWindow = SettingsWindowController(settings: settings)
+    private lazy var history = Self.openHistory(retentionDays: settings.historyRetentionDays)
+    private let desktopIcons = DesktopIconsController()
     private lazy var coordinator = CaptureCoordinator(
         settings: settings,
-        history: Self.openHistory(),
+        // Desktop-icon covers are ours but must stay in captures.
+        service: CaptureService(includedOwnWindows: { @MainActor [desktopIcons] in desktopIcons.coverWindowIDs }),
+        history: history,
         showOnboarding: { [weak self] in self?.onboarding.show() }
     )
+    private lazy var historyWindow = HistoryWindowController(store: history, settings: settings)
+    private lazy var urlRouter = URLSchemeRouter(
+        handler: AppAutomationHandler(coordinator: coordinator, settingsWindow: settingsWindow,
+                                      desktopIcons: desktopIcons),
+        displayFrames: { NSScreen.screens.map(\.frame) }
+    )
+    /// URLs that arrive before launch finishes are run once it has.
+    private var pendingURLs: [URL]? = []
     private lazy var sinkRouter = CaptureSinkRouter(fallback: SavingCaptureSink(output: coordinator.output))
     private var shortcuts: ShortcutController?
     private var menuBar: MenuBarController?
@@ -34,6 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let shortcuts = ShortcutController { [weak self] command in self?.perform(command) }
         shortcuts.register()
         self.shortcuts = shortcuts
+        pendingURLs.map { $0.forEach(urlRouter.open) }
+        pendingURLs = nil
         appLog.notice("ScreenCap launched, status item visible: \(self.menuBar?.isVisible ?? false)")
 
         if let kind = launch.capture {
@@ -44,10 +58,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        // URL scheme routing arrives in M7; log for now.
         for url in urls {
-            appLog.info("Received URL: \(url.absoluteString, privacy: .public)")
+            appLog.notice("Received URL: \(url.absoluteString, privacy: .public)")
         }
+        if pendingURLs != nil {
+            pendingURLs?.append(contentsOf: urls)
+        } else {
+            urls.forEach(urlRouter.open)
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        desktopIcons.show()
     }
 
     private var menuActions: AppMenu.Actions {
@@ -56,6 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selfTimer: { [weak self] seconds in self?.coordinator.startSelfTimer(seconds: seconds) },
             selfTimerSeconds: { [weak self] in self?.settings.selfTimerSeconds ?? 0 },
             openSettings: { [weak self] in self?.settingsWindow.show() },
+            openHistory: { NotificationCenter.default.post(name: .openHistoryRequested, object: nil) },
+            toggleDesktopIcons: { [weak self] in self?.desktopIcons.apply(.toggle) },
+            desktopIconsHidden: { [weak self] in self?.desktopIcons.isHidden ?? false },
             openOnboarding: { [weak self] in self?.onboarding.show() },
             toggleLaunchAtLogin: { LaunchAtLogin.toggle() },
             launchAtLoginIsOn: { LaunchAtLogin.isEnabled },
@@ -94,11 +119,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Each UI feature creates its controller here and assigns itself on `sinkRouter`
     /// (overlay, annotate, pin). Keep one line per feature so parallel PRs merge cleanly.
     private func installFeatures() {
+        settingsWindow.history = history // Screenshots, Wallpaper, Advanced, About panes (#28)
+        _ = historyWindow // History window, opens on .openHistoryRequested (#28)
+        coordinator.desktopIcons = desktopIcons // Hide desktop icons while capturing (#28)
     }
 
-    private static func openHistory() -> HistoryStore? {
+    private static func openHistory(retentionDays: Int) -> HistoryStore? {
         do {
-            return try HistoryStore()
+            return try HistoryStore(retentionDays: retentionDays)
         } catch {
             appLog.error("History unavailable: \(error.localizedDescription, privacy: .public)")
             return nil

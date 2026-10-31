@@ -28,6 +28,26 @@ extension CaptureCoordinator {
         }
     }
 
+    /// A capture at a known rect (URL scheme regions), skipping interactive selection.
+    func run(_ kind: CaptureKind, rect: CGRect, action: AfterCaptureAction?) async throws {
+        let geometry = DisplayGeometry.fromCurrentScreens()
+        let windows = (try? await service.shareableWindows()) ?? []
+        let flow = Flow(kind: kind, geometry: geometry, context: frontContext(windows: windows), action: action)
+        switch kind {
+        case .allInOne:
+            try await select(flow, windows: windows, preselected: rect)
+        case .selfTimer:
+            try await timedArea(rect, flow)
+        case .scrolling:
+            post(.scrollingCaptureRequested, rect: rect)
+        case .text:
+            post(.captureTextRequested, rect: rect)
+        case .area, .previousArea, .window, .fullscreen:
+            previousArea.remember(rect)
+            await deliver(try await service.captureArea(pointRect: rect), flow)
+        }
+    }
+
     func runWindow(ofApp app: String, action: AfterCaptureAction?) async throws {
         let windows = WindowPicker(windows: try await service.shareableWindows()).windows
         let match = windows.first {
@@ -57,7 +77,7 @@ extension CaptureCoordinator {
 
     // MARK: - Selection overlay
 
-    private func select(_ flow: Flow, windows: [ShareableWindow]) async throws {
+    private func select(_ flow: Flow, windows: [ShareableWindow], preselected: CGRect? = nil) async throws {
         let stills = try await service.captureAllDisplays()
         let options = SelectionOptions(
             showsStill: settings.freezeScreen,
@@ -65,7 +85,7 @@ extension CaptureCoordinator {
             showsMagnifier: settings.showMagnifier,
             allInOne: flow.kind == .allInOne,
             startMode: flow.kind == .window ? .window : .area,
-            previousRect: previousArea.rect(validIn: flow.geometry)
+            previousRect: preselected ?? previousArea.rect(validIn: flow.geometry)
         )
         let overlay = SelectionOverlay(stills: stills, geometry: flow.geometry, windows: windows, options: options)
         switch await overlay.run() {
