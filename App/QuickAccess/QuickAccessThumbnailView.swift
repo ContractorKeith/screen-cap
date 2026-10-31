@@ -14,12 +14,14 @@ final class QuickAccessThumbnailView: NSView, NSDraggingSource {
     /// Finger travel so far in the current swipe, for the panel to follow.
     var onSwipeChanged: ((CGFloat) -> Void)?
     var onSwipeEnded: ((SwipeTracker) -> Void)?
+    /// The system cancelled the swipe: put the panel back, commit nothing.
+    var onSwipeCancelled: (() -> Void)?
     var dragContents: (() -> QuickAccessDragContents)?
     let toolbar = QuickAccessToolbarView()
 
     private let image: CGImage
     private var mouseDownPoint: NSPoint?
-    private var tracker: SwipeTracker?
+    private var gesture = SwipeGesture()
 
     init(image: CGImage) {
         self.image = image
@@ -102,18 +104,29 @@ final class QuickAccessThumbnailView: NSView, NSDraggingSource {
     // MARK: - Swipe
 
     override func scrollWheel(with event: NSEvent) {
-        // Momentum after lifting the fingers and plain mouse wheels are not swipes.
-        guard event.momentumPhase.isEmpty, !event.phase.isEmpty else { return }
         let inverted = event.isDirectionInvertedFromDevice
-        if event.phase.contains(.began) || tracker == nil { tracker = SwipeTracker() }
-        if event.phase.contains(.changed) {
-            tracker?.add(dx: SwipeClassifier.fingerDelta(event.scrollingDeltaX, invertedFromDevice: inverted),
-                         dy: SwipeClassifier.fingerDelta(event.scrollingDeltaY, invertedFromDevice: inverted))
-            onSwipeChanged?(tracker?.dx ?? 0)
+        let steps = gesture.handle(
+            phase: SwipeGesture.Phase(event.phase), isMomentum: !event.momentumPhase.isEmpty,
+            dx: SwipeClassifier.fingerDelta(event.scrollingDeltaX, invertedFromDevice: inverted),
+            dy: SwipeClassifier.fingerDelta(event.scrollingDeltaY, invertedFromDevice: inverted)
+        )
+        for step in steps {
+            switch step {
+            case .moved(let dx): onSwipeChanged?(dx)
+            case .ended(let tracker): onSwipeEnded?(tracker)
+            case .cancelled: onSwipeCancelled?()
+            }
         }
-        if event.phase.contains(.ended) || event.phase.contains(.cancelled), let tracker {
-            self.tracker = nil
-            onSwipeEnded?(tracker)
-        }
+    }
+}
+
+extension SwipeGesture.Phase {
+    init(_ phase: NSEvent.Phase) {
+        self = []
+        if phase.contains(.began) { insert(.began) }
+        if phase.contains(.changed) { insert(.changed) }
+        if phase.contains(.ended) { insert(.ended) }
+        if phase.contains(.cancelled) { insert(.cancelled) }
+        if phase.contains(.mayBegin) { insert(.mayBegin) }
     }
 }

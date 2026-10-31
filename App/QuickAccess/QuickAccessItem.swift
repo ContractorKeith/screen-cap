@@ -50,32 +50,39 @@ final class QuickAccessItem {
     // MARK: - Drag-out
 
     /// What a drag carries right now. Prefers the saved file; encodes PNG on the spot if the
-    /// background preparation hasn't finished.
-    func dragContents() -> QuickAccessDragContents {
+    /// background preparation hasn't finished. Both honor the Retina 1x/2x output scale (#87).
+    func dragContents(scale: RetinaScale) -> QuickAccessDragContents {
         var contents = drag
         if let savedURL { contents.fileURL = savedURL }
         if contents.pngData == nil {
-            contents.pngData = try? Exporter(image: result.image.cgImage, format: .png,
-                                             scale: Double(result.image.scale)).data()
+            contents.pngData = Self.encode(result.image, scale: scale, format: .png)
         }
         return contents
+    }
+
+    /// The image at the output scale (same `OutputScaler` path as Save), encoded. Nil on failure
+    /// rather than a full-size image.
+    nonisolated static func encode(_ image: CapturedImage, scale: RetinaScale, format: ExportFormat) -> Data? {
+        guard let scaled = try? OutputScaler.scaled(image, to: scale) else { return nil }
+        return try? Exporter(image: scaled.cgImage, format: format, scale: Double(scaled.scale)).data()
     }
 
     /// Folder for drag-out temp files; emptied when Quick Access starts.
     static let temporaryFolder = FileManager.default.temporaryDirectory
         .appendingPathComponent("ScreenCap/QuickAccess", isDirectory: true)
 
-    /// Encodes PNG data and writes a temp file named by the filename template, in the save format.
-    static func prepareDrag(for result: CaptureResult, options: SaveOptions) async -> QuickAccessDragContents {
+    /// Encodes PNG data and writes a temp file named by the filename template, in the save format
+    /// and at the output scale. The panel and History keep the full-resolution capture.
+    static func prepareDrag(for result: CaptureResult, options: SaveOptions, in root: URL = temporaryFolder) async
+        -> QuickAccessDragContents {
         let image = result.image
+        let scale = options.scale
         let format = ExportFormat(options.format, quality: options.jpegQuality)
-        let folder = temporaryFolder.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let folder = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let url = folder.appendingPathComponent(options.template().filename(context: result.context))
         return await Task.detached(priority: .utility) {
-            let png = try? Exporter(image: image.cgImage, format: .png, scale: Double(image.scale)).data()
-            let fileData = format == .png
-                ? png
-                : try? Exporter(image: image.cgImage, format: format, scale: Double(image.scale)).data()
+            let png = encode(image, scale: scale, format: .png)
+            let fileData = format == .png ? png : encode(image, scale: scale, format: format)
             guard let fileData,
                   (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil,
                   (try? fileData.write(to: url, options: .atomic)) != nil

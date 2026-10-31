@@ -18,7 +18,10 @@ extension QuickAccessController {
             guard let self, let item else { return }
             perform(.annotate, on: item)
         }
-        thumbnail.dragContents = { [weak item] in item?.dragContents() ?? QuickAccessDragContents() }
+        thumbnail.dragContents = { [weak self, weak item] in
+            guard let self, let item else { return QuickAccessDragContents() }
+            return item.dragContents(scale: settings.retinaScale)
+        }
         thumbnail.onSwipeChanged = { [weak item] dx in
             guard let item else { return }
             item.panel.setFrameOrigin(CGPoint(x: item.baseFrame.minX + dx, y: item.baseFrame.minY))
@@ -27,6 +30,7 @@ extension QuickAccessController {
             guard let self, let item else { return }
             finishSwipe(tracker, on: item)
         }
+        thumbnail.onSwipeCancelled = { [weak self] in self?.layout() }
     }
 
     func perform(_ command: QuickAccessCommand, on item: QuickAccessItem) {

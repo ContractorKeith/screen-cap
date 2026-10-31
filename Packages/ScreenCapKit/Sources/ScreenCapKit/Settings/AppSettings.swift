@@ -13,7 +13,7 @@ public final class AppSettings {
         case hideDesktopIcons, launchAtLogin, lastCaptureRect, colorPalette
         case ocrKeepLineBreaks, ocrLanguages
         case windowShadow, fullscreenAllDisplays, selfTimerSeconds
-        case wallpaper, historyRetentionDays
+        case wallpaper, historyRetentionDays, windowBackground
     }
 
     /// Default values, shared with tests.
@@ -77,6 +77,8 @@ public final class AppSettings {
     public var selfTimerSeconds: Int { didSet { persist(.selfTimerSeconds, selfTimerSeconds) } }
     /// Background for "window with background" captures.
     public var wallpaper: WallpaperOptions { didSet { persist(.wallpaper, wallpaper) } }
+    /// Window captures are composited onto `wallpaper` with its padding (PLAN §3.1).
+    public var windowBackground: Bool { didSet { persist(.windowBackground, windowBackground) } }
     /// Days of capture history to keep; older captures are purged.
     public var historyRetentionDays: Int { didSet { persist(.historyRetentionDays, historyRetentionDays) } }
 
@@ -103,6 +105,7 @@ public final class AppSettings {
         fullscreenAllDisplays = Self.load(.fullscreenAllDisplays, from: store) ?? false
         selfTimerSeconds = Self.load(.selfTimerSeconds, from: store) ?? Defaults.selfTimerSeconds
         wallpaper = Self.load(.wallpaper, from: store) ?? Defaults.wallpaper
+        windowBackground = Self.load(.windowBackground, from: store) ?? false
         historyRetentionDays = Self.load(.historyRetentionDays, from: store) ?? Defaults.historyRetentionDays
     }
 
@@ -149,6 +152,7 @@ public final class AppSettings {
         fullscreenAllDisplays = fresh.fullscreenAllDisplays
         selfTimerSeconds = fresh.selfTimerSeconds
         wallpaper = fresh.wallpaper
+        windowBackground = fresh.windowBackground
         historyRetentionDays = fresh.historyRetentionDays
     }
 

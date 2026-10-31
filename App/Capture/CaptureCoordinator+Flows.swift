@@ -116,7 +116,10 @@ extension CaptureCoordinator {
         if flow.kind == .selfTimer {
             guard await selfTimer.countdown(seconds: settings.selfTimerSeconds, around: window.frame) else { return }
         }
-        let image = try await source.captureWindow(id: window.id, includeShadow: settings.windowShadow)
+        var image = try await source.captureWindow(id: window.id, includeShadow: settings.windowShadow)
+        if settings.windowBackground {
+            image = await WindowBackground.apply(settings.wallpaper, to: image, around: window.frame)
+        }
         let context = FilenameTemplate.Context(app: window.appName ?? flow.context.app, window: window.title)
         await deliver(image, flow, as: .window, context: context)
     }
