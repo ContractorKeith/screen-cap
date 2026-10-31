@@ -32,6 +32,9 @@ struct AppSettingsTests {
         #expect(!settings.colorPalette.isEmpty)
         #expect(settings.ocrKeepLineBreaks)
         #expect(settings.ocrLanguages == ["en-US"])
+        #expect(settings.windowShadow)
+        #expect(!settings.fullscreenAllDisplays)
+        #expect(settings.selfTimerSeconds == 5)
     }
 
     @Test func defaultsWriteNothing() {
@@ -89,6 +92,19 @@ struct AppSettingsTests {
         #expect(read.colorPalette == palette)
         #expect(!read.ocrKeepLineBreaks)
         #expect(read.ocrLanguages == ["de-DE", "en-US"])
+    }
+
+    @Test func roundTripsCaptureOptions() {
+        let store = InMemorySettingsStore()
+        let written = AppSettings(store: store)
+        written.windowShadow = false
+        written.fullscreenAllDisplays = true
+        written.selfTimerSeconds = 10
+
+        let read = AppSettings(store: store)
+        #expect(!read.windowShadow)
+        #expect(read.fullscreenAllDisplays)
+        #expect(read.selfTimerSeconds == 10)
     }
 
     @Test func clearingLastCaptureRectPersists() {

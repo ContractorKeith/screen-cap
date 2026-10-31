@@ -161,7 +161,19 @@ public actor CaptureService {
         config.captureResolution = .best
         config.ignoreShadowsSingleWindow = !request.includeShadow
         config.showsCursor = false
-        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        var image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        // With the shadow, the first capture squeezes window + shadow into the frame size; re-capture
+        // larger so the window body stays one pixel per pixel (see WindowShadow).
+        if request.includeShadow, let body = WindowShadow.opaqueBounds(of: image),
+           let size = WindowShadow.fullSize(
+               canvas: CGSize(width: image.width, height: image.height),
+               body: body,
+               bodyPixels: CGSize(width: config.width, height: config.height)
+           ) {
+            config.width = Int(size.width)
+            config.height = Int(size.height)
+            image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        }
         return CapturedImage(cgImage: image, scale: scale, pointRect: request.frame, displayID: request.displayID)
     }
 }

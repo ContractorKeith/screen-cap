@@ -14,6 +14,9 @@ settings:
 packages:
   ScreenCapKit:
     path: .
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    from: 1.10.0
 targets:
   ScreenCap:
     type: application
@@ -25,6 +28,7 @@ targets:
     dependencies:
       - package: ScreenCapKit
         product: ScreenCapKit
+      - package: KeyboardShortcuts
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.contractorkeith.screencap

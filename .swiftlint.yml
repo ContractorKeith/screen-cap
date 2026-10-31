@@ -1,6 +1,7 @@
 included:
   - App
   - Packages
+  - Tests
   - scripts
   - Package.swift
 excluded:
