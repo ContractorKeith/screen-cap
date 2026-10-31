@@ -2,11 +2,13 @@ import AppKit
 import ScreenCapKit
 import SwiftUI
 
-/// History retention, reset and launch at login.
+/// History retention, updates, reset and launch at login.
 struct AdvancedSettingsPane: View {
     @Bindable var settings: AppSettings
     let history: HistoryStore?
+    let updater: UpdaterController
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    @State private var autoUpdate = false
     @State private var confirmingReset = false
     @State private var status: String?
 
@@ -37,12 +39,28 @@ struct AdvancedSettingsPane: View {
                         settings.launchAtLogin = launchAtLogin
                     }
             }
+            Section("Updates") {
+                Toggle("Automatically check for updates", isOn: $autoUpdate)
+                    .disabled(!updater.isEnabled)
+                    .onChange(of: autoUpdate) { _, wanted in updater.automaticallyChecksForUpdates = wanted }
+                HStack {
+                    Button("Check Now") { updater.checkForUpdates() }
+                    if !updater.isEnabled {
+                        Text("This build isn't set up for automatic updates; Check Now opens the releases page.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
             Section("Reset") {
                 Button("Reset All Settings…", role: .destructive) { confirmingReset = true }
             }
         }
         .formStyle(.grouped)
-        .onAppear { launchAtLogin = LaunchAtLogin.isEnabled }
+        .onAppear {
+            launchAtLogin = LaunchAtLogin.isEnabled
+            autoUpdate = updater.automaticallyChecksForUpdates
+        }
         .confirmationDialog("Reset all settings to their defaults?", isPresented: $confirmingReset) {
             Button("Reset", role: .destructive) { settings.resetToDefaults() }
         } message: {

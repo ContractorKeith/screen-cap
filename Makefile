@@ -1,5 +1,5 @@
 # SwiftPM-first build. See AGENTS.md for details.
-.PHONY: build test bundle run lint clean
+.PHONY: build test bundle dmg appcast run lint clean
 
 # Command Line Tools (no Xcode) keep Swift Testing outside SwiftPM's default search
 # paths, so plain `swift test` runs 0 tests there. Pass the paths explicitly in that case.
@@ -22,6 +22,12 @@ test:
 bundle:
 	scripts/bundle.sh
 
+dmg:
+	scripts/dmg.sh
+
+appcast:
+	scripts/appcast.sh
+
 run: bundle
 	-pkill -x ScreenCap
 	open build/ScreenCap.app
@@ -31,4 +37,4 @@ lint:
 
 clean:
 	swift package clean
-	rm -rf .build build
+	rm -rf .build build dist

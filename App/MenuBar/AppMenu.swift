@@ -19,6 +19,7 @@ enum AppMenu {
         var quit: @MainActor () -> Void
         var pinFromClipboard: @MainActor () -> Void = {}
         var unlockAllPins: @MainActor () -> Void = {}
+        var checkForUpdates: @MainActor () -> Void = {}
     }
 
     static func entries(_ actions: Actions) -> [MenuEntry] {
@@ -45,7 +46,8 @@ enum AppMenu {
             .item(MenuAction("Hide Desktop Icons", isOn: actions.desktopIconsHidden,
                              perform: actions.toggleDesktopIcons)),
             .separator,
-            .item(MenuAction("Screen Recording Permission…", perform: actions.openOnboarding)),
+            .item(MenuAction("Welcome…", perform: actions.openOnboarding)),
+            .item(MenuAction("Check for Updates…", perform: actions.checkForUpdates)),
             .item(MenuAction("Launch at Login", isOn: actions.launchAtLoginIsOn, perform: actions.toggleLaunchAtLogin)),
             .item(MenuAction("Settings…", keyEquivalent: ",", perform: actions.openSettings)),
             .separator,

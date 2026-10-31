@@ -26,7 +26,8 @@ struct MenuModelTests {
             openOnboarding: { recorder.calls.append("onboarding") },
             toggleLaunchAtLogin: { recorder.calls.append("login") },
             launchAtLoginIsOn: { true },
-            quit: { recorder.calls.append("quit") }
+            quit: { recorder.calls.append("quit") },
+            checkForUpdates: { recorder.calls.append("updates") }
         )
     }
 
@@ -41,7 +42,7 @@ struct MenuModelTests {
             "Capture Area", "Capture Window", "Capture Fullscreen", "All-In-One", "Capture", "Annotate",
             "Hide Overlays", "Restore Recently Closed", "-",
             "History…", "Hide Desktop Icons", "-",
-            "Screen Recording Permission…", "Launch at Login", "Settings…", "-", "Quit ScreenCap"
+            "Welcome…", "Check for Updates…", "Launch at Login", "Settings…", "-", "Quit ScreenCap"
         ])
         #expect(menu.item(withTitle: "Settings…")?.keyEquivalent == ",")
         #expect(menu.item(withTitle: "Quit ScreenCap")?.keyEquivalent == "q")
@@ -65,10 +66,12 @@ struct MenuModelTests {
         let menu = MenuBuilder.menu(from: AppMenu.entries(actions(recorder)))
         fire(menu.item(withTitle: "Capture Window"))
         fire(menu.item(withTitle: "Capture Fullscreen"))
+        fire(menu.item(withTitle: "Welcome…"))
+        fire(menu.item(withTitle: "Check for Updates…"))
         fire(menu.item(withTitle: "Settings…"))
         fire(menu.item(withTitle: "Quit ScreenCap"))
         #expect(recorder.captures == [.window, .fullscreen])
-        #expect(recorder.calls == ["settings", "quit"])
+        #expect(recorder.calls == ["onboarding", "updates", "settings", "quit"])
     }
 
     @Test func captureSubmenuHoldsTheRest() throws {

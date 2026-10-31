@@ -1,0 +1,101 @@
+name: Release
+
+# Push an annotated tag (git tag -a v0.1.0 -m "notes" && git push origin v0.1.0).
+# The tag message becomes the release notes.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches version
+        run: |
+          VERSION="$(sed -nE 's/.*static let version = "([^"]+)".*/\1/p' \
+            Packages/ScreenCapKit/Sources/ScreenCapKit/ScreenCapKit.swift)"
+          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match ScreenCapKit.version $VERSION" >&2
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        timeout-minutes: 15
+        run: swift test
+
+      # --- Developer ID signing (enable once there is an Apple Developer account) ---
+      # Imports the certificate into a temporary keychain; bundle.sh then signs with it
+      # when SIGN_IDENTITY is set (add `env: SIGN_IDENTITY: ${{ env.SIGN_IDENTITY }}` to the DMG step).
+      # - name: Import signing certificate
+      #   env:
+      #     MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}         # base64 .p12
+      #     MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+      #   run: |
+      #     KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+      #     KEYCHAIN_PWD="$(uuidgen)"
+      #     echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+      #     security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+      #     security set-keychain-settings -lut 21600 "$KEYCHAIN"
+      #     security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+      #     security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERTIFICATE_PWD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+      #     security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PWD" "$KEYCHAIN"
+      #     security list-keychains -d user -s "$KEYCHAIN" login.keychain
+      #     echo "SIGN_IDENTITY=Developer ID Application: <Name> (${{ secrets.APPLE_TEAM_ID }})" >> "$GITHUB_ENV"
+
+      - name: Build DMG
+        run: make dmg
+
+      # --- Notarization (enable together with signing above) ---
+      # - name: Notarize and staple
+      #   env:
+      #     APPLE_ID: ${{ secrets.APPLE_ID }}
+      #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      #     APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}   # app-specific password
+      #   run: |
+      #     codesign --force --timestamp --sign "$SIGN_IDENTITY" "dist/ScreenCap-$VERSION.dmg"
+      #     xcrun notarytool submit "dist/ScreenCap-$VERSION.dmg" \
+      #       --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+      #     xcrun stapler staple "dist/ScreenCap-$VERSION.dmg"
+
+      # --- Sparkle appcast (enable once SUPublicEDKey is committed; see scripts/appcast.sh) ---
+      # Export the private key with `generate_keys -x key.txt` and store it as SPARKLE_PRIVATE_KEY.
+      # - name: Generate appcast
+      #   env:
+      #     SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+      #   run: echo "$SPARKLE_PRIVATE_KEY" | scripts/appcast.sh --ed-key-file -
+      # Then add dist/appcast.xml to the `gh release create` file list below.
+
+      - name: Checksum
+        run: |
+          cd dist
+          shasum -a 256 "ScreenCap-$VERSION.dmg" > "ScreenCap-$VERSION.dmg.sha256"
+          cat "ScreenCap-$VERSION.dmg.sha256"
+
+      - name: Release notes from tag message
+        run: |
+          # checkout@v4 can leave a lightweight copy of the tag; fetch the annotated object.
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+          [ -s "$RUNNER_TEMP/notes.md" ] || echo "ScreenCap $VERSION" > "$RUNNER_TEMP/notes.md"
+          cat >> "$RUNNER_TEMP/notes.md" <<'NOTES'
+
+          ---
+          This build is ad-hoc signed, not notarized. On first launch, right-click ScreenCap.app → Open.
+          NOTES
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/ScreenCap-$VERSION.dmg" "dist/ScreenCap-$VERSION.dmg.sha256" \
+            --title "ScreenCap $VERSION" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
