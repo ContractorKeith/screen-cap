@@ -20,6 +20,8 @@ final class ScrollingCaptureController {
     private let previewView = ScrollingPreviewView()
     private var keyMonitors: [Any] = []
     private var wake: CheckedContinuation<Void, Never>?
+    /// When the gap hint, if shown, goes away.
+    private var hintUntil: ContinuousClock.Instant?
     /// `--region` starts the first capture without waiting for Start.
     private var startsImmediately = false
 
@@ -110,15 +112,13 @@ final class ScrollingCaptureController {
                                                maxLength: Int(CGFloat(settings.maxLength) * frame.scale))
             stitcher = active
             lastFrame = frame
+            // While auto-scrolling, the posted step (points) tells the stitcher how far content moves.
+            let expected = scroller.state == .scrolling ? Int((CGFloat(step) * frame.scale).rounded()) : nil
+            await active.setExpectedStep(expected)
             let outcome = await active.append(frame: frame.cgImage)
             guard session.isCapturing else { break } // Cancel/Stop while appending
             session.record(outcome)
-            switch outcome {
-            case .started, .appended, .maxLengthReached:
-                lastPreview = await refreshPreview(active, last: lastPreview, force: !session.isCapturing)
-            case .noMovement, .unrelated:
-                break
-            }
+            lastPreview = await present(outcome, from: active, lastPreview: lastPreview)
             syncModel()
             try? await Task.sleep(until: tick + interval, clock: clock)
         }
@@ -130,6 +130,27 @@ final class ScrollingCaptureController {
         let origin = CGPoint(x: region.minX, y: region.maxY - size.height)
         return CapturedImage(cgImage: image, scale: scale, pointRect: CGRect(origin: origin, size: size),
                              displayID: lastFrame.displayID)
+    }
+
+    /// Refreshes the preview after progress and shows the gap hint for a few seconds after a jump.
+    private func present(_ outcome: Stitcher.AppendOutcome, from stitcher: Stitcher,
+                         lastPreview: ContinuousClock.Instant) async -> ContinuousClock.Instant {
+        let now = ContinuousClock.now
+        if let until = hintUntil, now >= until {
+            model.hint = nil
+            hintUntil = nil
+        }
+        switch outcome {
+        case .started, .appended, .maxLengthReached:
+            return await refreshPreview(stitcher, last: lastPreview, force: !session.isCapturing)
+        case .gapDetected:
+            appLog.info("Scrolling capture: content jumped; gap marked")
+            model.hint = ScrollingPanelModel.gapHint
+            hintUntil = now + .seconds(4)
+            return await refreshPreview(stitcher, last: lastPreview, force: true)
+        case .noMovement, .unrelated:
+            return lastPreview
+        }
     }
 
     /// Composing copies the whole canvas, so refresh less often as the image grows.
@@ -233,6 +254,9 @@ final class ScrollingCaptureController {
         let preview = ScrollingPanel(frame: layout.preview, titled: true)
         preview.contentView = previewView
         previewView.image = nil
+        model.hint = nil
+        hintUntil = nil
+        model.capturedSize = .zero
 
         panels = [border, preview, control]
         controlPanel = control

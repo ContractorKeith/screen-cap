@@ -48,7 +48,7 @@ public struct AutoScrollStopRule: Equatable, Sendable {
             return stillFrames >= noMovementLimit ? .endReached : nil
         case .maxLengthReached:
             return .maxLengthReached
-        case .started, .appended:
+        case .started, .appended, .gapDetected:
             stillFrames = 0
             return nil
         case .unrelated:
