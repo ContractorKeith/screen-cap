@@ -222,16 +222,19 @@ struct StitcherTests {
         #expect(ScrollFixtures.lines(of: image, axis: .vertical) == page)
     }
 
-    // Manual scrolling on repetitive content: the previous step breaks the tie once known.
-    @Test func repetitiveContentFollowsThePreviousStep() async throws {
+    // Issue #70: on fully periodic content only the auto-scroll distance can pick the offset;
+    // without it (manual scrolling) the frames are ambiguous rather than guessed.
+    @Test func repetitiveContentNeedsTheScrollDistance() async throws {
         let page = ScrollFixtures.repetitiveList(rows: 80, length: 1500, breadth: 300, ruleEvery: 4)
         let frames = ScrollFixtures.frames(page: page, viewport: 300, header: [], footer: [], step: 100)
         let aligner = FrameAligner(usesVision: false)
         let previous = ScrollFixtures.image(lines: frames[1], axis: .vertical)
         let next = ScrollFixtures.image(lines: frames[2], axis: .vertical)
-        #expect(aligner.align(previous: previous, next: next, axis: .vertical,
-                              prior: .init(previousStep: 96)) == .offset(100))
+        #expect(aligner.align(previous: previous, next: next, axis: .vertical) == .ambiguous)
         #expect(aligner.align(previous: previous, next: next, axis: .vertical,
                               prior: .init(expectedStep: 100)) == .offset(100))
+        // A distance that matches no candidate exactly is no evidence.
+        #expect(aligner.align(previous: previous, next: next, axis: .vertical,
+                              prior: .init(expectedStep: 90)) == .ambiguous)
     }
 }

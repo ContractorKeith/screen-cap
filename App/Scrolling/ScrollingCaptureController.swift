@@ -9,6 +9,7 @@ import SwiftUI
 @MainActor
 final class ScrollingCaptureController {
     private let coordinator: CaptureCoordinator
+    private let frameSource: any ScrollingFrameSource
     private let settings: ScrollingSettings
     private let poster: any ScrollEventPosting
     private let launch: ScrollingLaunchOptions
@@ -22,6 +23,8 @@ final class ScrollingCaptureController {
     private var wake: CheckedContinuation<Void, Never>?
     /// When the gap hint, if shown, goes away.
     private var hintUntil: ContinuousClock.Instant?
+    /// The last held frame was ambiguous (repeating rows) rather than a jump; picks the hint.
+    private var heldBecauseRepeating = false
     /// `--region` or a URL with `start=true` starts the next capture without waiting for Start.
     private var startsImmediately = false
     /// Auto-scroll for the next capture from a URL (`autoscroll=`); nil uses the launch option or setting.
@@ -30,8 +33,10 @@ final class ScrollingCaptureController {
 
     init(coordinator: CaptureCoordinator, settings: ScrollingSettings = .shared,
          poster: any ScrollEventPosting = SystemScrollEventPoster(),
-         launch: ScrollingLaunchOptions = .parse(CommandLine.arguments)) {
+         launch: ScrollingLaunchOptions = .parse(CommandLine.arguments),
+         frameSource: (any ScrollingFrameSource)? = nil) {
         self.coordinator = coordinator
+        self.frameSource = frameSource ?? coordinator.service
         self.settings = settings
         self.poster = poster
         self.launch = launch
@@ -72,22 +77,20 @@ final class ScrollingCaptureController {
         }
         let summary = "\(String(describing: session.mode)), \(session.axis.rawValue)"
         appLog.notice("Scrolling capture started: \(summary, privacy: .public)")
-        let stitched = await captureFrames(region: region)
+        let end = await captureFrames(region: region)
         guard session.phase == .finishing else {
             appLog.info("Scrolling capture cancelled")
             return
         }
         let reason = String(describing: session.stopReason)
         appLog.notice("Scrolling capture stopped: \(reason, privacy: .public)")
-        session.delivered(hasImage: stitched != nil)
         hideUI()
-        if let stitched {
-            await coordinator.deliver(stitched, kind: .scrolling, context: context, action: action)
-        }
+        await conclude(end, context: context, action: action)
     }
 
-    /// Grabs stills on a timer until the session leaves `.capturing`; returns the stitched image.
-    private func captureFrames(region: CGRect) async -> CapturedImage? {
+    /// Grabs stills on a timer until the session leaves `.capturing`; returns how it ended,
+    /// or nil if there is nothing to deliver or report.
+    private func captureFrames(region: CGRect) async -> ScrollingCaptureEnd? {
         let geometry = DisplayGeometry.fromCurrentScreens()
         let quartz = geometry.quartzRect(fromAppKit: region)
         let scrollPoint = CGPoint(x: quartz.midX, y: quartz.midY)
@@ -99,43 +102,36 @@ final class ScrollingCaptureController {
         let scroller = AutoScroller(axis: axis, step: step, interval: interval, poster: poster)
         defer { scroller.cancel() }
 
-        var stitcher: Stitcher?
-        var lastFrame: CapturedImage?
+        let collector = ScrollingFrameCollector(source: frameSource, region: region, axis: axis,
+                                                maxLength: settings.maxLength)
         var lastPreview = ContinuousClock.now - .seconds(1)
         let clock = ContinuousClock()
         while session.isCapturing {
             let tick = clock.now
             syncScroller(scroller, at: scrollPoint)
-            let frame: CapturedImage
-            do {
-                frame = try await coordinator.service.captureArea(pointRect: region)
-            } catch {
-                appLog.error("Scrolling frame failed: \(String(describing: error), privacy: .public)")
-                session.stop()
+            // While auto-scrolling, the distance posted since the last frame (points) tells the
+            // stitcher how far content moved; it only breaks ties on repeating content.
+            let posted = scroller.state == .scrolling ? scroller.takePostedDistance() : 0
+            let outcome = await collector.grab { scale in
+                posted > 0 ? Int((CGFloat(posted) * scale).rounded()) : nil
+            }
+            guard let outcome else {
+                let detail = collector.failure.map { String(describing: $0) } ?? "unknown"
+                appLog.error("Scrolling frame failed: \(detail, privacy: .public)")
+                session.fail()
                 break
             }
-            let active = stitcher ?? Stitcher(axis: axis, scale: frame.scale,
-                                               maxLength: Int(CGFloat(settings.maxLength) * frame.scale))
-            stitcher = active
-            lastFrame = frame
-            // While auto-scrolling, the posted step (points) tells the stitcher how far content moves.
-            let expected = scroller.state == .scrolling ? Int((CGFloat(step) * frame.scale).rounded()) : nil
-            await active.setExpectedStep(expected)
-            let outcome = await active.append(frame: frame.cgImage)
             guard session.isCapturing else { break } // Cancel/Stop while appending
             session.record(outcome)
-            lastPreview = await present(outcome, from: active, lastPreview: lastPreview)
+            if let stitcher = collector.stitcher {
+                lastPreview = await present(outcome, from: stitcher, lastPreview: lastPreview)
+            }
             syncModel()
             try? await Task.sleep(until: tick + interval, clock: clock)
         }
         scroller.cancel()
-        guard session.phase == .finishing, let stitcher, let lastFrame,
-              let image = await stitcher.finish() else { return nil }
-        let scale = lastFrame.scale
-        let size = CGSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
-        let origin = CGPoint(x: region.minX, y: region.maxY - size.height)
-        return CapturedImage(cgImage: image, scale: scale, pointRect: CGRect(origin: origin, size: size),
-                             displayID: lastFrame.displayID)
+        guard session.phase == .finishing else { return nil }
+        return await collector.finish()
     }
 
     /// Refreshes the preview after progress and shows the gap hint for a few seconds after a jump.
@@ -151,12 +147,21 @@ final class ScrollingCaptureController {
             return await refreshPreview(stitcher, last: lastPreview, force: !session.isCapturing)
         case .gapDetected:
             appLog.info("Scrolling capture: content jumped; gap marked")
-            model.hint = ScrollingPanelModel.gapHint
-            hintUntil = now + .seconds(4)
+            showHint(heldBecauseRepeating ? ScrollingPanelModel.repeatHint : ScrollingPanelModel.gapHint, now: now)
             return await refreshPreview(stitcher, last: lastPreview, force: true)
-        case .noMovement, .unrelated:
+        case .unrelated, .ambiguous:
+            // A held frame is kept after a seam if the user stops now, so warn straight away.
+            heldBecauseRepeating = outcome == .ambiguous
+            showHint(heldBecauseRepeating ? ScrollingPanelModel.repeatHint : ScrollingPanelModel.heldHint, now: now)
+            return lastPreview
+        case .noMovement:
             return lastPreview
         }
+    }
+
+    private func showHint(_ hint: String, now: ContinuousClock.Instant) {
+        model.hint = hint
+        hintUntil = now + .seconds(4)
     }
 
     /// Composing copies the whole canvas, so refresh less often as the image grows.
@@ -233,6 +238,7 @@ final class ScrollingCaptureController {
         previewView.image = nil
         model.hint = nil
         hintUntil = nil
+        heldBecauseRepeating = false
         model.capturedSize = .zero
 
         panels = [border, preview, control]
@@ -270,6 +276,36 @@ final class ScrollingCaptureController {
             }
         }) {
             keyMonitors.append(global)
+        }
+    }
+}
+
+// MARK: - Ending
+
+extension ScrollingCaptureController {
+    /// Delivers what was stitched, if anything, and names any problem in a HUD (#71, #76).
+    fileprivate func conclude(_ end: ScrollingCaptureEnd?, context: FilenameTemplate.Context,
+                              action: AfterCaptureAction?) async {
+        switch end {
+        case nil:
+            session.delivered(hasImage: false)
+        case let .failed(problem):
+            session.delivered(hasImage: false)
+            appLog.error("Scrolling capture failed: \(problem, privacy: .public)")
+            coordinator.record(.failed(problem))
+            CaptureHUD.show("Scrolling capture failed", detail: problem)
+        case let .image(image, problem, gapAtEnd):
+            session.delivered(hasImage: true)
+            await coordinator.deliver(image, kind: .scrolling, context: context, action: action)
+            if let problem {
+                appLog.error("Scrolling capture stopped early: \(problem, privacy: .public)")
+                coordinator.record(.failed(problem))
+                CaptureHUD.show("Scrolling capture stopped early",
+                                detail: "\(problem) What was stitched so far was kept.")
+            } else if gapAtEnd {
+                CaptureHUD.show("Gap marked at the end of the capture",
+                                detail: "The last screen didn't line up with the rest; a dashed line marks the gap.")
+            }
         }
     }
 }
