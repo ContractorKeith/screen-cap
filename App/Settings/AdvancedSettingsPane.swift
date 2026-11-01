@@ -19,11 +19,12 @@ struct AdvancedSettingsPane: View {
     var body: some View {
         Form {
             Section("History") {
-                Picker("Keep captures for", selection: retentionBinding) {
+                Picker(A11y.historyRetention, selection: retentionBinding) {
                     ForEach(Self.retentionChoices, id: \.self) { days in
                         Text(RetentionChange.days(days)).tag(days)
                     }
                 }
+                .accessibilityLabel(A11y.historyRetention)
                 HStack {
                     Button("Purge Now", action: purge)
                         .disabled(history == nil)
@@ -66,7 +67,9 @@ struct AdvancedSettingsPane: View {
         .confirmationDialog("Reset all settings to their defaults?", isPresented: $confirmingReset) {
             Button("Reset", role: .destructive) { SettingsReset.resetAll(settings: settings) }
         } message: {
-            Text("Shortcuts, saved captures, update checks and Launch at Login are not changed.")
+            // Retention stays too: resetting it would delete older captures (#125).
+            Text("Shortcuts, saved captures, how long History keeps them, update checks and "
+                + "Launch at Login are not changed.")
         }
         .confirmationDialog(pendingRetention?.title ?? "", isPresented: confirmingRetention,
                             presenting: pendingRetention) { change in

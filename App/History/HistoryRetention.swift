@@ -30,6 +30,17 @@ final class HistoryRetention {
         self.timer = timer
     }
 
+    /// Stops the hourly purge (tests; the app keeps one for its lifetime).
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    /// Waits for queued purges to finish (tests).
+    func settled() async {
+        await last?.value
+    }
+
     /// Deletes everything past the current window.
     func purge() {
         enqueue { store in try await store.purgeExpired() }

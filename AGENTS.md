@@ -52,13 +52,13 @@ pkill -x ScreenCap                                   # quit a running build
 - Hidden launch options drive captures without key presses (CI smoke tests):
   `build/ScreenCap.app/Contents/MacOS/ScreenCap --capture <area|window|fullscreen|previousArea|selfTimer|allInOne|scrolling|text> [--action save|copy|overlay|annotate|pin] [--window <app>] [--quit]`.
   Launched from Terminal, Screen Recording permission is Terminal's.
-- Build number: `bundle.sh` stamps `CFBundleVersion` with `git rev-list --count HEAD` (override with
+- Build number: `bundle.sh` runs `scripts/stamp-version.sh`, which stamps `CFBundleVersion` with `git rev-list --count HEAD` (override with
   `BUILD_NUMBER`) and `CFBundleShortVersionString` from `ScreenCapKit.version`. Sparkle compares
   `CFBundleVersion`, so the source plist's `1` must never ship; `scripts/check-bundle.sh` fails the
   bundle if it does. Needs full git history (CI checks out with `fetch-depth: 0`). CI runs
   `make bundle`, the check and a `--capture bogus --quit` launch (exit 3) on every PR.
 - Releases: bump `ScreenCapKit.version` and `CFBundleShortVersionString` together (dmg.sh and a
-  test fail on mismatch), update CHANGELOG.md, push an annotated `v<version>` tag; release.yml
+  test fail on mismatch), date the version's CHANGELOG.md section (0.1.0 is not tagged yet) and use it as the tag message, push an annotated `v<version>` tag; release.yml
   builds the DMG and the GitHub Release. Sparkle stays off until `SUPublicEDKey` replaces the
   Info.plist placeholder. bundle.sh embeds Sparkle.framework in Contents/Frameworks.
 - SwiftPM resource bundles (KeyboardShortcuts' localizations) ship in `Contents/Resources`; their generated

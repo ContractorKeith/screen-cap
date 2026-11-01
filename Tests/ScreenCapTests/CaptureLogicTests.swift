@@ -21,13 +21,31 @@ struct CaptureLogicTests {
     }
 
     /// #119: a bad `--region` with `--quit` is a usage error (exit 3), never the interactive overlay.
-    @Test(arguments: ["nan,0,100,100", "0,0,inf,100", "1e3,0,100,100", "0x10,0,100,100", "1,2,3"])
-    func badRegionWithQuitFailsFast(region: String) {
+    /// Asserts on `start`, the decision `runLaunchCapture` switches on (#135).
+    @Test(arguments: ["nan,0,100,100", "0,0,inf,100", "1e3,0,100,100", "0x10,0,100,100", "1,2,3",
+                      "0,0,0,100", "0,0,100,-5"])
+    func badRegionWithQuitFailsFast(region: String) throws {
         let parsed = LaunchArguments.parse(["ScreenCap", "--capture", "scrolling", "--region", region, "--quit"])
         #expect(parsed.problems == ["\(LaunchArguments.regionUsage), got \(region)"])
         #expect(parsed.warnings.isEmpty)
-        #expect(parsed.requestsCapture)
-        #expect(CaptureOutcome.notStarted(parsed.problems[0]).exitStatus == 3)
+        #expect(parsed.requestsCapture && parsed.quitAfterCapture)
+        guard case let .refused(outcome) = parsed.start else {
+            Issue.record("bad --region with --quit started \(parsed.start)")
+            return
+        }
+        #expect(outcome.exitStatus == 3)
+        #expect(outcome.reason.contains(LaunchArguments.regionUsage))
+    }
+
+    @Test func launchStartRunsOnlyCleanCaptures() {
+        #expect(LaunchArguments.parse(["ScreenCap"]).start == .none)
+        #expect(LaunchArguments.parse(["ScreenCap", "--capture", "scrolling", "--region", "0,0,100,100", "--quit"])
+            .start == .capture(.scrolling))
+        // Without --quit a bad region only warns, and the capture runs interactively.
+        #expect(LaunchArguments.parse(["ScreenCap", "--capture", "scrolling", "--region", "nan"])
+            .start == .capture(.scrolling))
+        #expect(LaunchArguments.parse(["ScreenCap", "--capture", "bogus", "--quit"]).start
+            == .refused(.notStarted("--capture needs a kind, got bogus")))
     }
 
     @Test func badRegionOptionOrderAndMissingValue() {

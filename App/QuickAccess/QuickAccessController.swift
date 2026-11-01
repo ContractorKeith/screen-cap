@@ -32,6 +32,7 @@ final class QuickAccessController: CaptureSink {
         self.temp = temp ?? .shared
         observe(.toggleOverlaysRequested) { $0.toggleHidden() }
         observe(.restoreRecentlyClosedRequested) { $0.restoreRecentlyClosed() }
+        observe(.focusQuickAccessRequested) { $0.focusNewest() }
         observe(NSApplication.didChangeScreenParametersNotification) { $0.layout() }
         observe(.addQuickAccessOverlayRequested) { controller, info in
             controller.showRequested(url: info?[AutomationKey.url] as? URL,

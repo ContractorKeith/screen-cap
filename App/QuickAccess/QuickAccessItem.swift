@@ -13,6 +13,8 @@ final class QuickAccessItem {
     var drag = QuickAccessDragContents()
     var prepareTask: Task<Void, Never>?
     var isHovered = false
+    /// The panel is key via Focus Quick Access (#129); its timer is paused meanwhile.
+    var isFocused = false
     /// Where the stack layout put the panel; swipes move it relative to this.
     var baseFrame: CGRect = .zero
     /// Past the visible-panel cap: ordered out, timer paused, counted in the "+N" badge (#116).
