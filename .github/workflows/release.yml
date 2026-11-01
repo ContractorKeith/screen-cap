@@ -31,8 +31,13 @@ jobs:
         run: swift build
 
       - name: Test
-        timeout-minutes: 35
-        run: swift test --no-parallel
+        timeout-minutes: 15
+        run: make test
+
+      # The slow tier (#140) gates every release, not only the nightly run.
+      - name: Slow tests
+        timeout-minutes: 45
+        run: make test-slow
 
       # --- Developer ID signing (enable once there is an Apple Developer account) ---
       # Imports the certificate into a temporary keychain; bundle.sh then signs with it

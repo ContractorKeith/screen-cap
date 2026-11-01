@@ -72,15 +72,25 @@ private final class FakePage: ScrollEventPosting, ScrollingFrameSource {
     }
 }
 
-/// The issue's Terminal fixture: 200 rows of 30 px, `$ make test` with `== build n ==` every 25 rows,
+/// The issue's Terminal fixture: rows of 30 px, `$ make test` with `== build n ==` every 25 rows,
 /// between the command at the top of the scrollback and the prompt at the bottom, as in the live repro.
 private enum TerminalFixture {
-    static let page: CGImage = render(
-        ["Last login: Sat Oct 31 14:58:02 on ttys004", "~ screen-cap  main", "> for i in $(seq 1 300); do",
-         ">   if (( i % 25 == 0 )); then echo \"== build $i ==\"", ">   else echo \"$ make test\"; fi", "> done"]
-            + (6..<198).map { $0 % 25 == 0 ? "== build \($0) ==" : "$ make test" }
-            + ["~ screen-cap  main", "> "]
-    )
+    /// 100 rows (3000 px): three markers, each run of `$ make test` longer than the 600 px region (#140).
+    static let page: CGImage = page(rows: 100)
+    /// The repro's 200 rows (6000 px), for the slow tier.
+    static let fullPage: CGImage = page(rows: 200)
+
+    /// Where the region's top stops: the end of the content.
+    static var end: Int { page.height - 600 }
+
+    static func page(rows: Int) -> CGImage {
+        render(
+            ["Last login: Sat Oct 31 14:58:02 on ttys004", "~ screen-cap  main", "> for i in $(seq 1 300); do",
+             ">   if (( i % 25 == 0 )); then echo \"== build $i ==\"", ">   else echo \"$ make test\"; fi", "> done"]
+                + (6..<rows - 2).map { $0 % 25 == 0 ? "== build \($0) ==" : "$ make test" }
+                + ["~ screen-cap  main", "> "]
+        )
+    }
 
     private static func render(_ lines: [String]) -> CGImage {
         let width = 600
@@ -108,15 +118,15 @@ private enum TerminalFixture {
 @MainActor
 @Suite("Scrolling frame loop")
 struct ScrollingFrameLoopTests {
-    private struct Run {
+    fileprivate struct Run {
         let session: ScrollingSession
         let end: ScrollingCaptureEnd?
         let frames: [ScrollingFrameLoop.Frame]
     }
 
     /// Runs an auto-scroll capture the way the controller does, until the session stops.
-    private func autoScroll(_ page: FakePage, step: Int = 100, limit: Int = 500,
-                            beforeFrame: (Int) -> Void = { _ in }) async -> Run {
+    fileprivate static func autoScroll(_ page: FakePage, step: Int = 100, limit: Int = 500,
+                                       beforeFrame: (Int) -> Void = { _ in }) async -> Run {
         var session = ScrollingSession(autoScroll: true)
         session.beginSelection()
         session.start()
@@ -137,7 +147,7 @@ struct ScrollingFrameLoopTests {
         return Run(session: session, end: await collector.finish(), frames: frames)
     }
 
-    private func pixels(_ image: CGImage) -> Data? {
+    fileprivate static func pixels(_ image: CGImage) -> Data? {
         // Redraw into a known layout so crops and stitched output compare byte for byte.
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
@@ -150,78 +160,91 @@ struct ScrollingFrameLoopTests {
     // #98 cause 1: the first frame shows the region as the user left it, before any scroll.
     @Test func firstFrameIsCapturedBeforeTheFirstScroll() async {
         let page = FakePage(image: TerminalFixture.page, viewport: 600)
-        _ = await autoScroll(page, limit: 3)
+        _ = await Self.autoScroll(page, limit: 3)
         // After each step the loop waits for the page to settle (#126): extra grabs, no extra scrolls.
         #expect(Array(page.log.prefix(3)) == [.frame(top: 0), .scroll(100), .frame(top: 100)])
         #expect(Array(page.scrolls.prefix(2)) == [100, 100])
     }
 
-    // #98 cause 2: repeating Terminal output auto-scrolls to the real end and stitches the whole page.
-    @Test func repetitiveTerminalStitchesTheWholePage() async throws {
+    /// One plain run over `TerminalFixture.page`, shared by the tests that only inspect it (#140).
+    private static var plainRun: (page: FakePage, run: Run)?
+    private static func sharedPlainRun() async -> (page: FakePage, run: Run) {
+        if let plainRun { return plainRun }
         let page = FakePage(image: TerminalFixture.page, viewport: 600)
-        let run = await autoScroll(page)
+        let result = (page, await autoScroll(page))
+        plainRun = result
+        return result
+    }
+
+    // #98 cause 2: repeating Terminal output auto-scrolls to the real end and stitches the whole page.
+    // On the 100-row page (#140); the repro's 200 rows run in the slow tier.
+    @Test func repetitiveTerminalStitchesTheWholePage() async throws {
+        let (page, run) = await Self.sharedPlainRun()
         #expect(run.session.stopReason == .endReached)
-        #expect(page.top == 5400) // the end of the content, not one screen in
+        #expect(page.top == TerminalFixture.end) // the end of the content, not one screen in
         guard case let .image(image, problem, gapMarked) = run.end else {
             Issue.record("expected an image")
             return
         }
         #expect(problem == nil)
         #expect(!gapMarked)
-        #expect(image.cgImage.height == 6000)
-        #expect(try #require(pixels(image.cgImage)) == pixels(TerminalFixture.page))
+        #expect(image.cgImage.height == TerminalFixture.page.height)
+        #expect(try #require(Self.pixels(image.cgImage)) == Self.pixels(TerminalFixture.page))
     }
 
     // A page that redraws late shows the same pixels twice mid-scroll. That isn't the end: the
-    // probe sees it still moving, and the run goes on to the bottom.
+    // probe sees it still moving, and the run goes on to the bottom. #98, on the 100-row page (#140).
     @Test func lateRedrawIsNotTheEnd() async throws {
         let page = FakePage(image: TerminalFixture.page, viewport: 600)
-        let run = await autoScroll(page) { index in
+        let run = await Self.autoScroll(page) { index in
             // Redraws later than the settle grabs allow, so stale frames still reach the stitcher.
             if index == 4 { page.staleCaptures = ScrollingFrameLoop.settleTries + 2 }
         }
         #expect(run.session.stopReason == .endReached)
-        #expect(page.top == 5400)
+        #expect(page.top == TerminalFixture.end)
         #expect(page.scrolls.prefix(7).contains(-100)) // the probe ran mid-page
         guard case let .image(image, _, gapMarked) = run.end else {
             Issue.record("expected an image")
             return
         }
         #expect(!gapMarked)
-        #expect(try #require(pixels(image.cgImage)) == pixels(TerminalFixture.page))
+        #expect(try #require(Self.pixels(image.cgImage)) == Self.pixels(TerminalFixture.page))
     }
 
     // A blinking cursor means no two frames are byte-identical, even at the end. Frames found in
-    // place still count as still, so the run ends instead of polling forever.
+    // place still count as still, so the run ends instead of polling forever. #98, on the 100-row
+    // page (#140): the frame bound is scaled with it.
     @Test func blinkingCursorStillEnds() async {
         let page = FakePage(image: TerminalFixture.page, viewport: 600)
         page.blinks = true
-        let run = await autoScroll(page)
+        let run = await Self.autoScroll(page)
         #expect(run.session.stopReason == .endReached)
-        #expect(page.top == 5400)
-        #expect(run.frames.count < 70, "\(run.frames.prefix(80).map { "\($0.outcome) \($0.changed)" })")
+        #expect(page.top == TerminalFixture.end)
+        // 27 frames here, 57 on the 200-row page (bound 70 there, see the slow tier): the same margin.
+        #expect(run.frames.count < 35, "\(run.frames.prefix(80).map { "\($0.outcome) \($0.changed)" })")
         guard case let .image(image, _, _) = run.end else {
             Issue.record("expected an image")
             return
         }
-        #expect(image.cgImage.height == 6000)
+        #expect(image.cgImage.height == TerminalFixture.page.height)
     }
 
-    // At the real end the probe scrolls back one step and returns to the same pixels.
+    // At the real end the probe scrolls back one step and returns to the same pixels. #98, sharing
+    // the plain run (#140).
     @Test func endIsConfirmedByAProbe() async {
-        let page = FakePage(image: TerminalFixture.page, viewport: 600)
-        let run = await autoScroll(page)
+        let (page, run) = await Self.sharedPlainRun()
         #expect(run.session.stopReason == .endReached)
         #expect(page.scrolls.suffix(2) == [-100, 100])
-        #expect(page.top == 5400)
+        #expect(page.top == TerminalFixture.end)
         #expect(run.frames.suffix(2).allSatisfy { !$0.changed })
     }
 
     // #126: the region starts on blank scrollback (900 px, more than a screen). Blank frames look
     // still while the page moves, and the probe can't see blank space move: that's not the end.
+    // On the 100-row page under the same 900 px of blank (#140).
     @Test func blankStartIsNotTheEnd() async {
         let page = FakePage(image: TerminalFixture.blankTopPage, viewport: 600)
-        let run = await autoScroll(page)
+        let run = await Self.autoScroll(page)
         #expect(run.session.stopReason == .endReached)
         #expect(page.top == TerminalFixture.blankTopPage.height - 600)
     }
@@ -229,7 +252,7 @@ struct ScrollingFrameLoopTests {
     // A page that doesn't scroll at all ends after the probe instead of running forever.
     @Test func pageThatNeverMovesEnds() async {
         let page = FakePage(image: TerminalFixture.prefixPage, viewport: 600)
-        let run = await autoScroll(page)
+        let run = await Self.autoScroll(page)
         #expect(run.session.stopReason == .endReached)
         #expect(run.frames.count == 3)
         guard case let .image(image, _, _) = run.end else {
@@ -258,4 +281,35 @@ extension TerminalFixture {
         return context.makeImage()!
         // swiftlint:enable force_unwrapping
     }()
+}
+
+/// #98 on the repro's full 200-row page (#140). Run with `make test-slow`.
+@MainActor
+@Suite("Scrolling frame loop, full page", .tags(.slow))
+struct ScrollingFrameLoopSlowTests {
+    @Test func repetitiveTerminalStitchesTheWholePage() async throws {
+        let page = FakePage(image: TerminalFixture.fullPage, viewport: 600)
+        let run = await ScrollingFrameLoopTests.autoScroll(page)
+        #expect(run.session.stopReason == .endReached)
+        #expect(page.top == 5400) // the end of the content, not one screen in
+        #expect(page.scrolls.suffix(2) == [-100, 100])
+        guard case let .image(image, problem, gapMarked) = run.end else {
+            Issue.record("expected an image")
+            return
+        }
+        #expect(problem == nil)
+        #expect(!gapMarked)
+        #expect(image.cgImage.height == 6000)
+        #expect(try #require(ScrollingFrameLoopTests.pixels(image.cgImage))
+            == ScrollingFrameLoopTests.pixels(TerminalFixture.fullPage))
+    }
+
+    @Test func blinkingCursorStillEnds() async {
+        let page = FakePage(image: TerminalFixture.fullPage, viewport: 600)
+        page.blinks = true
+        let run = await ScrollingFrameLoopTests.autoScroll(page)
+        #expect(run.session.stopReason == .endReached)
+        #expect(page.top == 5400)
+        #expect(run.frames.count < 70)
+    }
 }

@@ -22,9 +22,10 @@ jobs:
           swift --version
       - name: Build
         run: swift build
+      # Fast tier: slow end-to-end suites run nightly (nightly.yml) and before a release (#140).
       - name: Test
-        timeout-minutes: 35
-        run: swift test --no-parallel
+        timeout-minutes: 15
+        run: make test
       - name: SwiftLint
         run: |
           command -v swiftlint || brew install swiftlint

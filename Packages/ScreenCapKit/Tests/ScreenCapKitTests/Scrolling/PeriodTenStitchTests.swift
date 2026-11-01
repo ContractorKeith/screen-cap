@@ -17,10 +17,11 @@ struct PeriodTenStitchTests {
 
     // (posted px per frame, page px moved per frame). 240 → 360 is the issue's run (120 pt step,
     // Terminal moves 1.5×); 200 → 300 moves exactly one period per frame; 330 is the largest step
-    // a 330 pt region allows.
-    @Test(arguments: [(240, 360), (120, 180), (200, 300), (240, 240), (330, 330), (160, 240), (100, 150)])
+    // a 330 pt region allows. Guards #126 on the 100-line page (#140: debug-build time); the other
+    // steps, on the issue's 400 lines, run in the slow tier (`PeriodTenStitchSlowTests`).
+    @Test(arguments: [(240, 360), (200, 300), (330, 330)])
     func stitchesExactly(posted: Int, moved: Int) async throws {
-        let page = TerminalPage.periodTen
+        let page = TerminalPage.periodTenShort
         let run = try await AutoScrollStitchTests.autoScroll(page, viewport: Self.viewport, posted: posted,
                                                              moved: moved, noise: Self.liveNoise)
         AutoScrollStitchTests.expectExact(run, page: page)
@@ -30,8 +31,9 @@ struct PeriodTenStitchTests {
     // Live, Terminal's overlay scroll knob sits inside the region's right edge: fixed on screen and
     // creeping a little every step, so with it in, no row matched its moved copy and no offset
     // lined up (the capture then ran on unplaced). The knob strip is left out of matching.
+    // #126 on the 100-line page (#140).
     @Test func scrollKnobAtTheEdgeIsIgnored() async throws {
-        let page = TerminalPage.periodTen
+        let page = TerminalPage.periodTenShort
         let run = try await AutoScrollStitchTests.autoScroll(page, viewport: Self.viewport, posted: 240, moved: 360,
                                                              noise: Self.liveNoise, knob: true)
         #expect(run.seams == 0, "\(run.outcomes)")
@@ -46,9 +48,11 @@ struct PeriodTenStitchTests {
     // Live Terminal doesn't always move a constant multiple of the posted step. Where a move other
     // than the measured step leaves only `ok` rows in the overlap, pixels can't place it: a seam is
     // marked there. Rows are never dropped silently nor repeated, and the capture reaches the end.
-    @Test(arguments: [[360, 480], [360, 330, 390], [300, 360, 420, 360]])
+    // #126 on the 100-line page (#140): the pattern with moves below, at and above the step; the
+    // other two run in the slow tier.
+    @Test(arguments: [[300, 360, 420, 360]])
     func unevenMovesNeverDropOrRepeatSilently(pattern: [Int]) async throws {
-        let page = TerminalPage.periodTen
+        let page = TerminalPage.periodTenShort
         let run = try await AutoScrollStitchTests.autoScroll(page, viewport: Self.viewport, posted: 240, moved: 360,
                                                              pattern: pattern, noise: Self.liveNoise)
         try Self.expectFaithful(run, page: page)
@@ -56,10 +60,11 @@ struct PeriodTenStitchTests {
 
     // A jump one period further than the measured step (180 + 300 px) lines up with the step's
     // offset everywhere but the marker rows. It must never be dropped silently: either stitched
-    // exactly or marked with a seam.
-    @Test(arguments: [9, 14, 20])
+    // exactly or marked with a seam. #126 on the 100-line page (#140); frames 14 and 20 run on the
+    // issue's 400 lines in the slow tier.
+    @Test(arguments: [9])
     func periodJumpIsSeamedNotDropped(frame: Int) async throws {
-        let page = TerminalPage.periodTen
+        let page = TerminalPage.periodTenShort
         let run = try await AutoScrollStitchTests.autoScroll(page, viewport: Self.viewport, posted: 120, moved: 180,
                                                              jumps: [frame: 480], noise: Self.liveNoise)
         try Self.expectFaithful(run, page: page)
@@ -92,7 +97,10 @@ struct PeriodTenStitchTests {
                                      sourceLocation: SourceLocation = #_sourceLocation) {
         let stitched = run.lines.map(AutoScrollStitchTests.rowHash)
         let rows = TerminalPage.rowHeight
-        for row in TerminalPage.periodTenMarkerRows {
+        let markers = TerminalPage.periodTenMarkerRows(count: (page.count / rows) - TerminalPage.periodTenFooter
+            - TerminalPage.periodTenHeader.count)
+        #expect(!markers.isEmpty, sourceLocation: sourceLocation)
+        for row in markers {
             let block = page[row * rows..<(row + 1) * rows].map(AutoScrollStitchTests.rowHash)
             let found = stitched.indices.filter { start in
                 stitched[start] == block[0] && start + rows <= stitched.count
@@ -103,6 +111,54 @@ struct PeriodTenStitchTests {
     }
 }
 
+/// The full #126 runs on the issue's 400-line page: the step sizes and the late jump the fast
+/// suite leaves out (#140). Run with `make test-slow`.
+@Suite("Auto-scroll on period-10 output, full page", .tags(.slow))
+struct PeriodTenStitchSlowTests {
+    typealias Line = ScrollFixtures.Line
+
+    @Test(arguments: [(240, 360), (120, 180), (200, 300), (240, 240), (330, 330), (160, 240), (100, 150)])
+    func stitchesExactly(posted: Int, moved: Int) async throws {
+        let page = TerminalPage.periodTen
+        let run = try await AutoScrollStitchTests.autoScroll(page, viewport: PeriodTenStitchTests.viewport,
+                                                             posted: posted, moved: moved,
+                                                             noise: PeriodTenStitchTests.liveNoise)
+        AutoScrollStitchTests.expectExact(run, page: page)
+        PeriodTenStitchTests.expectEachMarkerOnce(run, page: page)
+    }
+
+    @Test(arguments: [9, 14, 20])
+    func periodJumpIsSeamedNotDropped(frame: Int) async throws {
+        let page = TerminalPage.periodTen
+        let run = try await AutoScrollStitchTests.autoScroll(page, viewport: PeriodTenStitchTests.viewport,
+                                                             posted: 120, moved: 180, jumps: [frame: 480],
+                                                             noise: PeriodTenStitchTests.liveNoise)
+        try PeriodTenStitchTests.expectFaithful(run, page: page)
+    }
+
+    @Test(arguments: [[360, 480], [360, 330, 390], [300, 360, 420, 360]])
+    func unevenMovesNeverDropOrRepeatSilently(pattern: [Int]) async throws {
+        let page = TerminalPage.periodTen
+        let run = try await AutoScrollStitchTests.autoScroll(page, viewport: PeriodTenStitchTests.viewport,
+                                                             posted: 240, moved: 360, pattern: pattern,
+                                                             noise: PeriodTenStitchTests.liveNoise)
+        try PeriodTenStitchTests.expectFaithful(run, page: page)
+    }
+
+    @Test func scrollKnobAtTheEdgeIsIgnored() async throws {
+        let page = TerminalPage.periodTen
+        let run = try await AutoScrollStitchTests.autoScroll(page, viewport: PeriodTenStitchTests.viewport,
+                                                             posted: 240, moved: 360,
+                                                             noise: PeriodTenStitchTests.liveNoise, knob: true)
+        #expect(run.seams == 0, "\(run.outcomes)")
+        #expect(run.lines.count == page.count)
+        let text = { (lines: [Line]) in lines.map { Array($0.prefix(900)) } }
+        let trimmed = AutoScrollStitchTests.Run(outcomes: run.outcomes, lines: text(run.lines), seams: run.seams,
+                                                measuredScale: run.measuredScale)
+        PeriodTenStitchTests.expectEachMarkerOnce(trimmed, page: text(page))
+    }
+}
+
 extension TerminalPage {
     /// Scrollback above the issue's command: blank lines left by `clear`.
     static let periodTenHeader = Array(repeating: "", count: 18)
@@ -110,12 +166,24 @@ extension TerminalPage {
            "> clear; for i in $(seq 1 400); do if (( i % 10 == 0 )); then echo \"-- step $i --\"; ",
            "else echo \"ok\"; fi; done"]
 
-    /// The #126 page: the command, 400 lines of period-10 output, the prompt.
-    static let periodTen: [Line] = render(
-        periodTenHeader + (1...400).map { $0 % 10 == 0 ? "-- step \($0) --" : "ok" } + ["", "~  v3.11.8", "> "],
-        width: 1000
-    )
+    /// Rows after the output: a blank line and the prompt.
+    static let periodTenFooter = 3
 
-    /// Text rows of `periodTen` holding a `-- step n --` marker.
-    static let periodTenMarkerRows: [Int] = (1...400).filter { $0 % 10 == 0 }.map { periodTenHeader.count + $0 - 1 }
+    /// The #126 page: the command, `lines` of period-10 output, the prompt.
+    static func periodTen(lines: Int) -> [Line] {
+        render(periodTenHeader + (1...lines).map { $0 % 10 == 0 ? "-- step \($0) --" : "ok" }
+                   + ["", "~  v3.11.8", "> "],
+               width: 1000)
+    }
+
+    /// The issue's page: 400 lines of output.
+    static let periodTen: [Line] = periodTen(lines: 400)
+
+    /// 100 lines: ten markers, each 300 px apart, so every 660 px region still holds one (#140).
+    static let periodTenShort: [Line] = periodTen(lines: 100)
+
+    /// Text rows holding a `-- step n --` marker on a page with `count` lines of output.
+    static func periodTenMarkerRows(count: Int) -> [Int] {
+        (1...count).filter { $0 % 10 == 0 }.map { periodTenHeader.count + $0 - 1 }
+    }
 }

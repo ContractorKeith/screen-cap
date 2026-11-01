@@ -1,0 +1,25 @@
+name: Nightly
+
+# The slow test tier (#140): full-size scrolling pages and the whole redaction OCR matrix,
+# too slow for every PR. `make test` skips them; `make test-slow` runs only them.
+on:
+  schedule:
+    - cron: "0 7 * * *" # 03:00 US Eastern (EDT)
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  slow-tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcode-select -p
+          swift --version
+      - name: Slow tests
+        timeout-minutes: 45
+        run: make test-slow
