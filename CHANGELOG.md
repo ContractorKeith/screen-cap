@@ -9,6 +9,8 @@ and versions follow [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+- Fix custom-image Background presets across documents by storing their images separately and importing them when applied.
+
 ## [0.1.0] - Unreleased
 
 First release, not yet tagged. Ad-hoc signed, not notarized.
