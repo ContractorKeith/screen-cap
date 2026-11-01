@@ -10,11 +10,14 @@ final class HistoryRetention {
 
     private let store: HistoryStore
     private let settings: AppSettings
+    private let showFailure: (String) -> Void
     private var timer: Timer?
     /// Purges run in order so a quick run of setting changes ends on the last one.
     private var last: Task<Void, Never>?
 
-    init(store: HistoryStore, settings: AppSettings) {
+    init(store: HistoryStore, settings: AppSettings,
+         showFailure: @escaping (String) -> Void = { HUDPanel.show($0, duration: .seconds(6)) }) {
+        self.showFailure = showFailure
         self.store = store
         self.settings = settings
     }
@@ -73,6 +76,11 @@ final class HistoryRetention {
                 appLog.notice("History retention purged \(removed.count) capture(s)")
                 NotificationCenter.default.post(name: .historyRecordsChanged, object: nil)
             } catch {
+                if case let HistoryError.filesNotRemoved(_, removed) = error {
+                    TempFiles.shared.release(records: removed)
+                    NotificationCenter.default.post(name: .historyRecordsChanged, object: nil)
+                }
+                showFailure(error.localizedDescription)
                 appLog.error("History purge failed: \(error.localizedDescription, privacy: .public)")
             }
         }

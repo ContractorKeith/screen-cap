@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import ScreenCapKit
 
-/// A saved Background tool setup, applied from the Background panel.
+/// A saved Background tool setup; custom images are stored separately by `id`.
 struct BackgroundPreset: Codable, Equatable, Identifiable, Sendable {
     var id = UUID()
     var name: String
@@ -19,6 +19,7 @@ final class EditorPreferences {
     static let shared = EditorPreferences()
 
     @ObservationIgnored private let store: any SettingsStore
+    @ObservationIgnored let presetImages: BackgroundPresetImages
 
     var defaultTool: EditorTool { didSet { persist("defaultTool", defaultTool) } }
     var rememberLastTool: Bool { didSet { persist("rememberLastTool", rememberLastTool) } }
@@ -27,10 +28,18 @@ final class EditorPreferences {
     /// Fill for new shapes; nil means no fill.
     var fillColor: RGBAColor? { didSet { persist("fillColor", fillColor) } }
     var strokeWidth: Double { didSet { persist("strokeWidth", strokeWidth) } }
-    var backgroundPresets: [BackgroundPreset] { didSet { persist("backgroundPresets", backgroundPresets) } }
+    var backgroundPresets: [BackgroundPreset] {
+        didSet {
+            persist("backgroundPresets", backgroundPresets)
+            let retained = Set(backgroundPresets.map(\.id))
+            for preset in oldValue where !retained.contains(preset.id) { presetImages.remove(for: preset.id) }
+        }
+    }
 
-    init(store: any SettingsStore = UserDefaultsSettingsStore()) {
+    init(store: any SettingsStore = UserDefaultsSettingsStore(),
+         presetImages: BackgroundPresetImages = BackgroundPresetImages()) {
         self.store = store
+        self.presetImages = presetImages
         defaultTool = Self.load("defaultTool", store) ?? .arrow
         rememberLastTool = Self.load("rememberLastTool", store) ?? true
         lastTool = Self.load("lastTool", store) ?? .arrow
@@ -38,6 +47,17 @@ final class EditorPreferences {
         fillColor = Self.load("fillColor", store) ?? nil
         strokeWidth = Self.load("strokeWidth", store) ?? 4
         backgroundPresets = Self.load("backgroundPresets", store) ?? []
+    }
+
+    /// Persist the image before publishing the preset, so failed writes leave no broken entry.
+    func saveBackgroundPreset(name: String, snapshot: EditorSnapshot) throws {
+        guard let background = snapshot.document.background else { return }
+        let preset = BackgroundPreset(name: name, background: background, aspect: snapshot.backgroundAspect)
+        if case let .customImage(layerName) = background.fill {
+            guard let image = snapshot.layers[layerName] else { throw PresetImageError.unavailable }
+            try presetImages.save(image, for: preset.id)
+        }
+        backgroundPresets.append(preset)
     }
 
     /// Tool a new editor window starts with.

@@ -59,7 +59,9 @@ pkill -x ScreenCap                                   # quit a running build
   `BUILD_NUMBER`) and `CFBundleShortVersionString` from `ScreenCapKit.version`. Sparkle compares
   `CFBundleVersion`, so the source plist's `1` must never ship; `scripts/check-bundle.sh` fails the
   bundle if it does. Needs full git history (CI checks out with `fetch-depth: 0`). CI runs
-  `make bundle`, the check and a `--capture bogus --quit` launch (exit 3) on every PR.
+  `make bundle` before `make test` so bundle/security regressions execute, then the check and a
+  `--capture bogus --quit` launch (exit 3) on every PR. Missing or stale bundles fail tests in CI;
+  local runs report a known issue and request `make bundle`.
 - Releases: bump `ScreenCapKit.version` and `CFBundleShortVersionString` together (dmg.sh and a
   test fail on mismatch), date the version's CHANGELOG.md section (0.1.0 is not tagged yet) and use it as the tag message, push an annotated `v<version>` tag; release.yml
   builds the DMG and the GitHub Release. Sparkle stays off until `SUPublicEDKey` replaces the

@@ -14,10 +14,14 @@ public struct Renderer: Sendable {
         self.redaction = redaction
     }
 
-    /// Output size in pixels for `document` under `options`.
+    /// Output size in pixels for `document` under `options`; `(0, 0)` for invalid or oversized geometry.
     public static func pixelSize(for document: Document, options: RenderOptions) -> (width: Int, height: Int) {
         let canvas = layout(for: document, options: options).canvas
-        return (Int((canvas.width * options.scale).rounded()), Int((canvas.height * options.scale).rounded()))
+        let scaled = CGSize(width: (canvas.width * options.scale).rounded(),
+                            height: (canvas.height * options.scale).rounded())
+        guard DocumentLimits.scale(options.scale), DocumentLimits.size(scaled),
+              (try? document.validateGeometry()) != nil else { return (0, 0) }
+        return (Int(scaled.width), Int(scaled.height))
     }
 
     /// Renders `document` into a new sRGB RGBA bitmap of `pixelSize(for:options:)`.
@@ -28,8 +32,10 @@ public struct Renderer: Sendable {
         layers: [String: CGImage] = [:],
         options: RenderOptions = RenderOptions()
     ) throws -> CGImage {
-        guard options.scale > 0, options.scale.isFinite else { throw RenderError.invalidScale(options.scale) }
+        guard DocumentLimits.scale(options.scale) else { throw RenderError.invalidScale(options.scale) }
         let size = Self.pixelSize(for: document, options: options)
+        try document.validateGeometry()
+        guard size.width > 0, size.height > 0 else { throw ProjectFileError.invalidGeometry("rendered size") }
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(
                   data: nil, width: max(size.width, 1), height: max(size.height, 1),
@@ -51,7 +57,8 @@ public struct Renderer: Sendable {
         options: RenderOptions = RenderOptions(),
         in context: CGContext
     ) {
-        guard options.scale > 0, options.scale.isFinite else { return }
+        let size = Self.pixelSize(for: document, options: options)
+        guard size.width > 0, size.height > 0 else { return }
         let layout = Self.layout(for: document, options: options)
         let scale = options.scale
 

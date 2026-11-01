@@ -8,21 +8,22 @@ extension EditorDocumentModel {
     // MARK: - Crop
 
     /// Starts crop mode with the whole image selected and detects UI edges to snap to.
-    func beginCrop() {
+    @discardableResult
+    func beginCrop() -> Task<Void, Never> {
         tool = .crop
         selection = []
         cropRect = CGRect(origin: .zero, size: snapshot.imageSize)
         cropEdges = CropEdges()
+        touch()
         let image = baseImage
         let revisionAtStart = revision
-        Task.detached(priority: .userInitiated) {
+        return Task.detached(priority: .userInitiated) {
             let edges = CropEdgeDetector.edges(in: image)
             await MainActor.run { [weak self] in
                 guard let self, self.revision == revisionAtStart else { return }
                 self.cropEdges = edges
             }
         }
-        touch()
     }
 
     var cropRatio: Double? { cropAspect.ratio(custom: customAspect) }
@@ -125,8 +126,22 @@ extension EditorDocumentModel {
         }
     }
 
-    func applyPreset(_ preset: BackgroundPreset) {
-        setBackground(preset.background, aspect: preset.aspect)
+    func applyPreset(_ preset: BackgroundPreset, preferences: EditorPreferences = .shared) throws {
+        guard case .customImage = preset.background.fill else {
+            setBackground(preset.background, aspect: preset.aspect)
+            return
+        }
+        // Load before editing: legacy or missing images must not leave a dangling layer reference.
+        let image = try preferences.presetImages.load(for: preset.id)
+        let name = "background-\(UUID().uuidString.lowercased())"
+        var background = preset.background
+        background.fill = .customImage(layerName: name)
+        perform { snapshot in
+            snapshot.layers[name] = image
+            snapshot.document.background = background
+            snapshot.backgroundAspect = preset.aspect
+            snapshot.refitCanvas()
+        }
     }
 
     static let defaultBackground = Document.Background(fill: .bundled(name: BundledBackgrounds.names[0]))

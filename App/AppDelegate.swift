@@ -182,7 +182,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The failure is kept so the first capture says why History is off (#113).
     private static func openHistory(retentionDays: Int) -> Result<HistoryStore, Error> {
         do {
-            return .success(try HistoryStore(retentionDays: retentionDays))
+            return .success(try HistoryStore(retentionDays: retentionDays, onRemovalFailure: { error in
+                Task { @MainActor in HUDPanel.show(error.localizedDescription, duration: .seconds(6)) }
+            }))
         } catch {
             appLog.error("History unavailable: \(error.localizedDescription, privacy: .public)")
             return .failure(error)

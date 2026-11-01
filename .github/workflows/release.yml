@@ -30,6 +30,10 @@ jobs:
       - name: Build
         run: swift build
 
+      # Bundle/security regressions require a current app, including in release CI.
+      - name: Bundle
+        run: make bundle
+
       - name: Test
         timeout-minutes: 15
         run: make test
