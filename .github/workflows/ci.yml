@@ -22,6 +22,9 @@ jobs:
           swift --version
       - name: Build
         run: swift build
+      # Build first so bundle/security regression tests execute against the shipped artifact (#157).
+      - name: Bundle
+        run: make bundle
       # Fast tier: slow end-to-end suites run nightly (nightly.yml) and before a release (#140).
       - name: Test
         timeout-minutes: 15
@@ -30,9 +33,6 @@ jobs:
         run: |
           command -v swiftlint || brew install swiftlint
           swiftlint --strict --reporter github-actions-logging
-      # The ship path on every PR: release build, Sparkle embedding, signing, Info.plist check (#77, #80).
-      - name: Bundle
-        run: make bundle
       - name: Check bundle
         run: scripts/check-bundle.sh build/ScreenCap.app
       - name: Launch smoke test
