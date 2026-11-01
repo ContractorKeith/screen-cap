@@ -44,9 +44,15 @@ readonly_files="$(find "$APP" ! -type l ! -perm -u+w)"
 if [[ -n "$readonly_files" ]]; then
   echo "Files not user-writable (bundle.sh must chmod -R u+w):" >&2; echo "$readonly_files" >&2; fail=1
 fi
-# #141: an ad-hoc cdhash requirement changes every build and loses the Screen Recording grant.
-if codesign -dr - "$APP" 2>&1 | grep -q 'designated => cdhash'; then
-  echo "Designated requirement is a cdhash; bundle.sh must pin it to the bundle identifier" >&2; fail=1
+# #146: an ad-hoc signature has no certificate, so its designated requirement must be its cdhash.
+# Anything weaker (e.g. `identifier "…"` alone) lets any ad-hoc app with our ID inherit our TCC grants.
+# Captured first: `cmd | grep -q` can SIGPIPE cmd, which pipefail turns into a false "no match".
+signature="$(codesign -dv "$APP" 2>&1 || true)"
+if [[ "$signature" == *$'\nSignature=adhoc'* ]]; then
+  requirement="$(codesign -d -r- "$APP" 2>&1 | grep 'designated =>' || true)"
+  if [[ "$requirement" != *cdhash* ]]; then
+    echo "Ad-hoc signature's designated requirement is not cdhash-anchored: ${requirement:-none}" >&2; fail=1
+  fi
 fi
 (( fail == 0 )) || exit 1
 echo "Bundle OK: $SHORT ($BUILD)"

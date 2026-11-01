@@ -59,7 +59,7 @@ First release, not yet tagged. Ad-hoc signed, not notarized.
 - Keyboard control of History: arrows move (⇧ extends), Return opens, Space previews, ⌘C copies,
   ⌘A selects all, ⌫ deletes (#130).
 - The welcome window spots an update that lost Screen Recording and gives the `tccutil reset`
-  command to copy, then waits for the new grant (#141).
+  command to copy, then waits for the new grant. Ad-hoc builds need this after every update (#141, #146).
 
 ### Fixed
 
@@ -121,8 +121,12 @@ Found in the pre-release QA passes.
 #### Build
 - Every build gets a real build number, and CI checks the bundle (#82).
 - The app ships its dependencies' resource bundles, so the Shortcuts pane works on any Mac (#96).
-- Ad-hoc builds sign with a fixed identifier, entitlements file and designated requirement
-  instead of a per-build cdhash (#141).
+- Ad-hoc builds keep codesign's default cdhash designated requirement, and `check-bundle.sh` fails
+  any ad-hoc build whose requirement isn't cdhash-anchored (#146). #141 had pinned the requirement
+  to the bundle identifier so updates kept Screen Recording; that was reverted for security,
+  because an ad-hoc signature has no certificate to anchor to and any ad-hoc app claiming
+  ScreenCap's identifier would have inherited its grant. Each new version needs a fresh grant
+  until builds are Developer ID signed (`SIGN_IDENTITY`, which grants then survive).
 - Every file in the bundle is user-writable, so `xattr -d com.apple.quarantine` succeeds (#142).
 - `make test` no longer leaves test preference files in `~/Library/Preferences` (#120).
 
