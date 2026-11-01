@@ -43,7 +43,8 @@ Everything else is Apple frameworks.
 
 **Distribution.** GitHub Releases (`.dmg`) plus a Homebrew cask. Signing with a Developer ID
 and notarizing needs an Apple Developer account ($99/yr). Until there is one, releases are
-ad-hoc signed and the README documents right-click → Open. The Mac App Store is out: the
+ad-hoc signed and the README documents the Gatekeeper override (Open Anyway in Privacy &
+Security on macOS 15+, right-click → Open on 14). The Mac App Store is out: the
 sandbox blocks the auto-scroll and Finder-level overlays this app needs.
 
 ## 3. Feature matrix
@@ -309,7 +310,7 @@ open "screencap://capture-area?action=copy"        # automation smoke test
 |---|---|
 | Development needs a Mac; this repo was planned on Linux | All code and CI target macOS runners; ScreenCapKit logic tests run headless |
 | macOS shows a recurring "screen recording" reminder to apps using ScreenCaptureKit | Use `SCScreenshotManager` stills (not a persistent stream) except during scrolling capture; document the system prompt |
-| Unsigned builds trip Gatekeeper | Documented right-click → Open now; Developer ID + notarization in CI once an account exists |
+| Unsigned builds trip Gatekeeper | Documented Open Anyway (15+) / right-click → Open (14) now; Developer ID + notarization in CI once an account exists |
 | Scroll stitching fails on animated or lazily loaded pages | Frame-difference gating, fixed-header detection, user can stop and trim; ship with the §5.4 app list as the bar |
 | Frozen overlay on many/high-res displays uses a lot of memory | Capture at native scale but downsample the overlay image for display; free stills as soon as capture ends |
 | Global shortcut conflicts with macOS's own ⇧⌘3/4/5 | Default to ⇧⌘1-style alternates and offer to take over the system shortcuts in onboarding |

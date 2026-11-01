@@ -32,7 +32,7 @@ struct WallpaperSettingsTests {
         settings.wallpaper.style = .solid
         settings.resetToDefaults()
         #expect(settings.filenameTemplate == AppSettings.Defaults.filenameTemplate)
-        #expect(settings.historyRetentionDays == 30)
+        #expect(settings.historyRetentionDays == 3) // retention governs stored captures (#125)
         #expect(AppSettings(store: store).wallpaper == WallpaperOptions())
     }
 

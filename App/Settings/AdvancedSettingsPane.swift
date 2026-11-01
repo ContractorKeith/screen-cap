@@ -67,7 +67,9 @@ struct AdvancedSettingsPane: View {
         .confirmationDialog("Reset all settings to their defaults?", isPresented: $confirmingReset) {
             Button("Reset", role: .destructive) { SettingsReset.resetAll(settings: settings) }
         } message: {
-            Text("Shortcuts, saved captures, update checks and Launch at Login are not changed.")
+            // Retention stays too: resetting it would delete older captures (#125).
+            Text("Shortcuts, saved captures, how long History keeps them, update checks and "
+                + "Launch at Login are not changed.")
         }
         .confirmationDialog(pendingRetention?.title ?? "", isPresented: confirmingRetention,
                             presenting: pendingRetention) { change in
