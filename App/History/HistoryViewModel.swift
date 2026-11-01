@@ -16,6 +16,8 @@ final class HistoryViewModel {
     var kindFilter: HistoryKind?
     var query = ""
     var selection: Set<UUID> = []
+    /// The keyboard cursor (#130): where arrow keys move from and what Return opens.
+    var cursor: UUID?
 
     @ObservationIgnored private let store: HistoryStore?
     @ObservationIgnored private let retentionDays: @MainActor () -> Int
@@ -36,6 +38,27 @@ final class HistoryViewModel {
 
     var selectedRecords: [CaptureRecord] {
         visible.filter { selection.contains($0.id) }
+    }
+
+    /// The record Return and Space act on: the cursor if selected, else the first selected.
+    var focusedRecord: CaptureRecord? {
+        let visible = visible
+        if let cursor, selection.contains(cursor), let record = visible.first(where: { $0.id == cursor }) {
+            return record
+        }
+        return visible.first { selection.contains($0.id) }
+    }
+
+    /// Arrow-key move through the grid (#130). Without `extending` it selects only the new cell;
+    /// with ⇧ it adds the new cell to the selection. Returns the new cursor for scrolling.
+    @discardableResult
+    func moveCursor(_ direction: GridMove, columns: Int, extending: Bool) -> UUID? {
+        guard let id = Self.moveCursor(in: visible.map(\.id), from: cursor, direction, columns: columns) else {
+            return nil
+        }
+        cursor = id
+        selection = Self.selecting(id, in: selection, extending: extending)
+        return id
     }
 
     /// True when any selected record had its Quick Access overlay closed.
@@ -68,6 +91,45 @@ final class HistoryViewModel {
         return selection.symmetricDifference([id])
     }
 
+    enum GridMove: Sendable { case left, right, above, below }
+
+    /// The cursor after an arrow-key move over `ids` (grid order). Nil when there are none.
+    nonisolated static func moveCursor(in ids: [UUID], from cursor: UUID?, _ direction: GridMove,
+                                       columns: Int) -> UUID? {
+        let current = cursor.flatMap { ids.firstIndex(of: $0) }
+        return move(from: current, direction, columns: columns, count: ids.count).map { ids[$0] }
+    }
+
+    /// Arrow keys select just the new cell; ⇧-arrows add it.
+    nonisolated static func selecting(_ id: UUID, in selection: Set<UUID>, extending: Bool) -> Set<UUID> {
+        extending ? selection.union([id]) : [id]
+    }
+
+    /// Index after an arrow-key move in a row-major grid of `columns` and `count` cells.
+    /// No cursor yet lands on the first cell. Left/right stop at the ends; above/below move a row and
+    /// stay put at the top or bottom row. Down into a shorter last row lands on its last cell.
+    nonisolated static func move(from index: Int?, _ direction: GridMove, columns: Int, count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        guard let index, index < count else { return 0 }
+        let columns = max(1, columns)
+        switch direction {
+        case .left: return max(0, index - 1)
+        case .right: return min(count - 1, index + 1)
+        case .above: return index >= columns ? index - columns : index
+        case .below:
+            let lastRow = (count - 1) / columns
+            guard index / columns < lastRow else { return index }
+            return min(count - 1, index + columns)
+        }
+    }
+
+    /// How many columns `LazyVGrid`'s adaptive layout fits in `width`: as many `minimum`-wide
+    /// cells with `spacing` between them as fit, at least one.
+    nonisolated static func columnCount(width: CGFloat, minimum: CGFloat, spacing: CGFloat) -> Int {
+        guard width > 0 else { return 1 }
+        return max(1, Int(((width + spacing) / (minimum + spacing)).rounded(.down)))
+    }
+
     static func canRestore(_ records: [CaptureRecord]) -> Bool {
         records.contains { $0.closedAt != nil }
     }
@@ -91,6 +153,7 @@ final class HistoryViewModel {
         records = await store.records()
         storageBytes = await store.storageSize()
         selection.formIntersection(Set(records.map(\.id)))
+        if let cursor, !records.contains(where: { $0.id == cursor }) { self.cursor = nil }
     }
 
     func delete(_ ids: Set<UUID>) async {

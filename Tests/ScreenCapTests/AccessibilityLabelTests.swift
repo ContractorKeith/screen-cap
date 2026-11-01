@@ -52,9 +52,17 @@ struct AccessibilityLabelTests {
         #expect(A11y.spokenShortcut("⌘⌥A") == "Command Option A")
     }
 
+    /// #132: the Resize sheet fields and the retention popup had no AX label.
+    @Test func resizeAndRetentionLabels() {
+        #expect(A11y.resizeWidth == "Width in pixels")
+        #expect(A11y.resizeHeight == "Height in pixels")
+        #expect(A11y.historyRetention == "Keep captures for")
+    }
+
     @Test func otherLabelsAreHuman() {
         let labels = [A11y.arrowStyle, A11y.textStyle, A11y.cropAspect, A11y.inspectorPanel, A11y.pickScreenColor,
-                      A11y.addToPalette, A11y.historySearch, A11y.background("Dusk"), A11y.alignment(.topLeft)]
+                      A11y.addToPalette, A11y.historySearch, A11y.historyGrid, A11y.background("Dusk"),
+                      A11y.alignment(.topLeft), A11y.resizeWidth, A11y.resizeHeight, A11y.historyRetention]
         for label in labels { #expect(!Self.looksLikeSymbol(label), "\(label)") }
     }
 }

@@ -40,6 +40,8 @@ enum AppMenu {
             .submenu("Annotate", EditorMenu.entries),
             .item(MenuAction("Hide Overlays", shortcut: .toggleOverlays, isOn: { QuickAccessVisibility.isHidden },
                              perform: post(.toggleOverlaysRequested))),
+            .item(MenuAction("Focus Quick Access", shortcut: .focusQuickAccess,
+                             perform: post(.focusQuickAccessRequested))),
             .item(MenuAction("Restore Recently Closed", perform: post(.restoreRecentlyClosedRequested))),
             .separator,
             .item(MenuAction("History…", shortcut: .openHistory, perform: actions.openHistory)),

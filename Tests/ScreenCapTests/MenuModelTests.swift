@@ -40,7 +40,7 @@ struct MenuModelTests {
         let titles = menu.items.map { $0.isSeparatorItem ? "-" : $0.title }
         #expect(titles == [
             "Capture Area", "Capture Window", "Capture Fullscreen", "All-In-One", "Capture", "Annotate",
-            "Hide Overlays", "Restore Recently Closed", "-",
+            "Hide Overlays", "Focus Quick Access", "Restore Recently Closed", "-",
             "History…", "Hide Desktop Icons", "-",
             "Welcome…", "Check for Updates…", "Launch at Login", "Settings…", "-", "Quit ScreenCap"
         ])

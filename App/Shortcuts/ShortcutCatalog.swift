@@ -14,6 +14,7 @@ extension KeyboardShortcuts.Name {
     static let captureText = Self("captureText", default: .init(.o, modifiers: [.control, .shift]))
     static let openHistory = Self("openHistory", default: .init(.h, modifiers: [.control, .shift]))
     static let toggleOverlays = Self("toggleOverlays", default: .init(.x, modifiers: [.control, .shift]))
+    static let focusQuickAccess = Self("focusQuickAccess", default: .init(.q, modifiers: [.control, .shift]))
 }
 
 /// Every global shortcut with its title, in the order Settings shows them.
@@ -24,6 +25,7 @@ enum ShortcutCatalog {
         case capture(CaptureKind)
         case openHistory
         case toggleOverlays
+        case focusQuickAccess
     }
 
     struct Entry {
@@ -42,7 +44,8 @@ enum ShortcutCatalog {
         Entry(name: .scrollingCapture, title: "Scrolling Capture", command: .capture(.scrolling)),
         Entry(name: .captureText, title: "Capture Text", command: .capture(.text)),
         Entry(name: .openHistory, title: "Open History", command: .openHistory),
-        Entry(name: .toggleOverlays, title: "Hide/Show Overlays", command: .toggleOverlays)
+        Entry(name: .toggleOverlays, title: "Hide/Show Overlays", command: .toggleOverlays),
+        Entry(name: .focusQuickAccess, title: "Focus Quick Access", command: .focusQuickAccess)
     ]
 
     /// The shortcut name bound to a capture kind, for menu hints.

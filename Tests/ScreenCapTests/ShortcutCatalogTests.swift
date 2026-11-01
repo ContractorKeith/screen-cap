@@ -9,7 +9,7 @@ struct ShortcutCatalogTests {
         let names = ShortcutCatalog.all.map(\.name.rawValue)
         #expect(names == [
             "captureArea", "captureWindow", "captureFullscreen", "capturePreviousArea", "selfTimer",
-            "allInOne", "scrollingCapture", "captureText", "openHistory", "toggleOverlays"
+            "allInOne", "scrollingCapture", "captureText", "openHistory", "toggleOverlays", "focusQuickAccess"
         ])
     }
 

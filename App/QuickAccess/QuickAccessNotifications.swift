@@ -6,6 +6,8 @@ import Foundation
 extension Notification.Name {
     /// A history record changed outside the History window (restored, OCR text added); it reloads.
     static let historyRecordsChanged = Notification.Name("ScreenCapHistoryRecordsChanged")
+    /// Focus Quick Access shortcut or menu item: the newest panel takes keyboard focus (#129).
+    static let focusQuickAccessRequested = Notification.Name("ScreenCapFocusQuickAccessRequested")
 }
 
 /// userInfo keys used on the notifications above and on `.captureTextRequested` from Quick Access,

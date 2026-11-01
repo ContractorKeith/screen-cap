@@ -31,9 +31,29 @@ extension QuickAccessController {
             finishSwipe(tracker, on: item)
         }
         thumbnail.onSwipeCancelled = { [weak self] in self?.layout() }
+        wireKeyboard(item)
+    }
+
+    /// Key presses and focus changes while the panel is key (#129).
+    private func wireKeyboard(_ item: QuickAccessItem) {
+        item.panel.onKey = { [weak self, weak item] event in
+            guard let self, let item else { return false }
+            return handleKey(event, on: item)
+        }
+        item.panel.onFocusChange = { [weak item] focused in
+            guard let item else { return }
+            item.isFocused = focused
+            item.panel.thumbnail.isFocused = focused
+            if focused {
+                item.timer.pause(at: Date())
+            } else if !item.isHovered, !QuickAccessVisibility.isHidden {
+                item.timer.resume(at: Date())
+            }
+        }
     }
 
     func perform(_ command: QuickAccessCommand, on item: QuickAccessItem) {
+        let refocus = item.isFocused ? visibleItems.firstIndex { $0 === item } : nil
         switch command {
         case .copy: Task { await copy(item) }
         case .save: Task { await save(item) }
@@ -41,9 +61,49 @@ extension QuickAccessController {
         case .pin: handOff(item, to: router?.pin, action: .pin, notification: .pinRequested)
         case .ocr: requestText(item)
         case .reveal: Task { await reveal(item) }
-        case .close: Task { await close(item) }
-        case .delete: Task { await delete(item) }
+        case .close: Task { await close(item); focusAfterRemoving(item, at: refocus) }
+        case .delete: Task { await delete(item); focusAfterRemoving(item, at: refocus) }
         }
+    }
+
+    // MARK: - Keyboard (#129)
+
+    /// Panels on screen (not behind the "+N" badge), newest first.
+    private var visibleItems: [QuickAccessItem] { items.filter { !$0.isOverflowed } }
+
+    /// Focus Quick Access: makes the newest panel key, showing hidden overlays first.
+    func focusNewest() {
+        if QuickAccessVisibility.isHidden { setHidden(false) }
+        guard let newest = visibleItems.first else {
+            HUDPanel.show("No Quick Access captures")
+            return
+        }
+        newest.panel.focusForKeyboard()
+    }
+
+    private func handleKey(_ event: NSEvent, on item: QuickAccessItem) -> Bool {
+        guard let action = QuickAccessKeys.action(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers,
+                                                  modifiers: event.modifierFlags,
+                                                  corner: settings.quickAccess.position)
+        else { return false }
+        switch action {
+        case let .command(command):
+            perform(command, on: item)
+        case .next, .previous:
+            let visible = visibleItems
+            guard let index = visible.firstIndex(where: { $0 === item }) else { return true }
+            visible[QuickAccessKeys.move(from: index, by: action, count: visible.count)].panel.focusForKeyboard()
+        }
+        return true
+    }
+
+    /// A focused panel that closed hands focus to the panel now in its place, so a keyboard user
+    /// can work down the stack. Nothing happens if the panel stayed (Cancel in the close prompt).
+    private func focusAfterRemoving(_ item: QuickAccessItem, at index: Int?) {
+        guard let index, !items.contains(where: { $0 === item }) else { return }
+        let visible = visibleItems
+        guard !visible.isEmpty else { return }
+        visible[min(index, visible.count - 1)].panel.focusForKeyboard()
     }
 
     private func finishSwipe(_ tracker: SwipeTracker, on item: QuickAccessItem) {

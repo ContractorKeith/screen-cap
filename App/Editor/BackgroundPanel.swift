@@ -252,7 +252,9 @@ struct TransformSheet: View {
             Divider()
             Form {
                 TextField("Width (px)", text: Binding { widthText } set: { setWidth($0, size: size) })
+                    .accessibilityLabel(A11y.resizeWidth)
                 TextField("Height (px)", text: Binding { heightText } set: { setHeight($0, size: size) })
+                    .accessibilityLabel(A11y.resizeHeight)
                 Toggle("Keep aspect ratio", isOn: $keepAspect)
             }
             Text(verdict.message ?? Self.limitHint)

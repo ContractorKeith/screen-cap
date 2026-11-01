@@ -1,9 +1,17 @@
 import AppKit
 
-/// One floating Quick Access thumbnail. Never becomes key, so it never takes focus from
-/// the app the user is working in; shows on every Space and over full-screen apps.
+/// One floating Quick Access thumbnail; shows on every Space and over full-screen apps.
+/// Becomes key only when the Focus Quick Access shortcut asks (#129), so clicks and new captures
+/// never take focus from the app the user is working in. Being non-activating, it takes key
+/// without bringing the app's other windows forward.
 final class QuickAccessPanel: NSPanel {
     let thumbnail: QuickAccessThumbnailView
+    /// A key press while focused, already mapped (`QuickAccessKeys`); return false to pass it on.
+    var onKey: ((NSEvent) -> Bool)?
+    /// The panel gained or lost key focus.
+    var onFocusChange: ((Bool) -> Void)?
+    /// Set by `focusForKeyboard()`, cleared when the panel resigns key.
+    private var acceptsKeyboardFocus = false
     private let dimensionsLabel = QuickAccessPanel.label(size: 11, weight: .medium, color: .labelColor)
     private let nameLabel = QuickAccessPanel.label(size: 10, weight: .regular, color: .secondaryLabelColor)
 
@@ -24,8 +32,35 @@ final class QuickAccessPanel: NSPanel {
         contentView = makeContent(size: size)
     }
 
-    override var canBecomeKey: Bool { false }
+    override var canBecomeKey: Bool { acceptsKeyboardFocus }
     override var canBecomeMain: Bool { false }
+
+    /// Takes keyboard focus without activating the app (#129).
+    func focusForKeyboard() {
+        acceptsKeyboardFocus = true
+        makeKeyAndOrderFront(nil)
+    }
+
+    override func becomeKey() {
+        super.becomeKey()
+        onFocusChange?(true)
+    }
+
+    override func resignKey() {
+        super.resignKey()
+        acceptsKeyboardFocus = false
+        onFocusChange?(false)
+    }
+
+    // ⌘ shortcuts arrive as key equivalents, the rest as key downs; both go through `onKey`.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if isKeyWindow, onKey?(event) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if onKey?(event) != true { super.keyDown(with: event) }
+    }
 
     /// Two-line info under the thumbnail: dimensions (plus file size once saved), then the
     /// filename or a status message.
