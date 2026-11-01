@@ -9,6 +9,7 @@ struct BackgroundPanel: View {
     @Bindable var preferences: EditorPreferences
     @State private var presetName = ""
     @State private var namingPreset = false
+    @State private var presetError: String?
 
     enum FillKind: String, CaseIterable { case none = "None", solid = "Solid", gradient = "Gradient",
                                                bundled = "Built-in", custom = "Image" }
@@ -37,6 +38,13 @@ struct BackgroundPanel: View {
                     .help("Pick padding and alignment that center the content")
             }
             presetControls
+        }
+        .alert("Background Preset", isPresented: Binding { presetError != nil } set: {
+            if !$0 { presetError = nil }
+        }) {
+            Button("OK") { presetError = nil }
+        } message: {
+            Text(presetError ?? "")
         }
         .alert("Save Background Preset", isPresented: $namingPreset) {
             TextField("Name", text: $presetName)
@@ -161,7 +169,11 @@ struct BackgroundPanel: View {
         HStack {
             Menu("Presets") {
                 ForEach(preferences.backgroundPresets) { preset in
-                    Button(preset.name) { model.applyPreset(preset) }
+                    Button(preset.name) {
+                        do {
+                            try model.applyPreset(preset, preferences: preferences)
+                        } catch { presetError = error.localizedDescription }
+                    }
                 }
                 if !preferences.backgroundPresets.isEmpty {
                     Divider()
@@ -178,12 +190,13 @@ struct BackgroundPanel: View {
     }
 
     private func savePreset() {
-        guard let background else { return }
+        guard background != nil else { return }
         let name = presetName.trimmingCharacters(in: .whitespaces)
-        preferences.backgroundPresets.append(BackgroundPreset(
-            name: name.isEmpty ? "Preset \(preferences.backgroundPresets.count + 1)" : name,
-            background: background, aspect: model.snapshot.backgroundAspect
-        ))
+        do {
+            try preferences.saveBackgroundPreset(
+                name: name.isEmpty ? "Preset \(preferences.backgroundPresets.count + 1)" : name,
+                snapshot: model.snapshot)
+        } catch { presetError = error.localizedDescription }
     }
 
     // MARK: - Helpers

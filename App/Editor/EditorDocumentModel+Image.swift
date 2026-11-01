@@ -126,8 +126,22 @@ extension EditorDocumentModel {
         }
     }
 
-    func applyPreset(_ preset: BackgroundPreset) {
-        setBackground(preset.background, aspect: preset.aspect)
+    func applyPreset(_ preset: BackgroundPreset, preferences: EditorPreferences = .shared) throws {
+        guard case .customImage = preset.background.fill else {
+            setBackground(preset.background, aspect: preset.aspect)
+            return
+        }
+        // Load before editing: legacy or missing images must not leave a dangling layer reference.
+        let image = try preferences.presetImages.load(for: preset.id)
+        let name = "background-\(UUID().uuidString.lowercased())"
+        var background = preset.background
+        background.fill = .customImage(layerName: name)
+        perform { snapshot in
+            snapshot.layers[name] = image
+            snapshot.document.background = background
+            snapshot.backgroundAspect = preset.aspect
+            snapshot.refitCanvas()
+        }
     }
 
     static let defaultBackground = Document.Background(fill: .bundled(name: BundledBackgrounds.names[0]))
