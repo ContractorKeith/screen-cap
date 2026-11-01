@@ -129,7 +129,9 @@ public final class AppSettings {
         )
     }
 
-    /// Puts every setting back to its default. Launch at Login is left alone (the system owns it).
+    /// Puts every setting back to its default. Launch at Login is left alone (the system owns it),
+    /// and so is History retention: it governs stored captures, and dropping 60 or 90 days back to
+    /// 30 would delete the older ones at the next purge (#125).
     public func resetToDefaults() {
         let fresh = AppSettings(store: InMemorySettingsStore())
         saveFolder = fresh.saveFolder
@@ -153,7 +155,6 @@ public final class AppSettings {
         selfTimerSeconds = fresh.selfTimerSeconds
         wallpaper = fresh.wallpaper
         windowBackground = fresh.windowBackground
-        historyRetentionDays = fresh.historyRetentionDays
     }
 
     // MARK: - Persistence
