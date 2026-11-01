@@ -40,22 +40,25 @@ plutil -lint "$CONTENTS/Info.plist" >/dev/null
 # `xattr -d com.apple.quarantine` and later updates can touch every file (#142).
 chmod -R u+w "$APP"
 
-# Sparkle's nested helpers (Autoupdate, Updater.app, XPC services) are signed first, on their own,
-# so the app's identifier and requirement below don't leak into them.
-ID="com.contractorkeith.screencap"
-ENTITLEMENTS="App/Resources/ScreenCap.entitlements"
+# Sparkle's nested helpers (Autoupdate, Updater.app, XPC services) are signed first, on their own.
+#
+# Ad hoc (default): codesign's default designated requirement is the cdhash. It changes every build,
+# so macOS asks for Screen Recording again after each rebuild or update; the welcome window walks
+# the user through that. Never pin it to the identifier alone: with no certificate to anchor to,
+# any ad-hoc app claiming our identifier would inherit the grant (#146).
+#
+# Developer ID: set SIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" (release.yml shows
+# where). The default requirement is then anchored to Apple and the team ID, so grants persist
+# across updates and can't be forged. Not used yet: there is no Apple Developer account.
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   codesign --force --deep --sign - "$CONTENTS/Frameworks/Sparkle.framework"
-  # Ad hoc: the default designated requirement is the cdhash, which changes every build, so macOS
-  # treats each build as a new app for Screen Recording. Pin it to the bundle identifier (#141).
-  codesign --force --sign - --identifier "$ID" --entitlements "$ENTITLEMENTS" \
-    --requirements "=designated => identifier \"$ID\"" "$APP"
+  codesign --force --sign - "$APP"
 else
+  # --- Developer ID path (only when SIGN_IDENTITY is set) ---
   codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" \
     "$CONTENTS/Frameworks/Sparkle.framework"
-  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" --identifier "$ID" \
-    --entitlements "$ENTITLEMENTS" "$APP"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
 fi
 codesign --verify --verbose=1 "$APP"
 scripts/check-bundle.sh "$APP" "$BIN_DIR"

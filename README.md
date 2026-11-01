@@ -88,8 +88,10 @@ the Releases page.
    Screenshot** button. Tick "Don't show again" to skip it next time; **Welcome…** in the menu
    brings it back.
 
-**After an update.** Until builds are Developer ID signed, macOS may treat a new version as a new
-app: the old ScreenCap toggle stays on but no longer applies, and the welcome window says
+**After an update.** Builds are ad-hoc signed, so macOS ties Screen Recording to the exact build
+you granted. Every new version (and every source rebuild) needs a fresh grant; only a Developer ID
+signature lets a grant carry over, and ScreenCap isn't Developer ID signed yet. After an update the
+old ScreenCap toggle stays on but no longer applies, and the welcome window says
 "ScreenCap was updated". Run `tccutil reset ScreenCapture com.contractorkeith.screencap` in
 Terminal (the window has a **Copy Command** button), then click **Open System Settings** and turn
 ScreenCap on again. Selecting the old entry and clicking **–** works too.
@@ -143,8 +145,9 @@ make dmg        # dist/ScreenCap-<version>.dmg
 make lint       # swiftlint --strict
 ```
 
-Builds are ad-hoc signed with a fixed identifier and designated requirement, so a rebuild can
-keep its Screen Recording grant. If macOS asks again anyway, reset it as in "After an update" above.
+Builds are ad-hoc signed, so every rebuild needs Screen Recording granted again; reset it as in
+"After an update" above. `SIGN_IDENTITY="Developer ID Application: …" make bundle` signs with a
+Developer ID instead (hardened runtime, timestamp), and then grants persist across rebuilds.
 If Xcode is installed but its license isn't accepted, run
 `export DEVELOPER_DIR=/Library/Developer/CommandLineTools` first.
 
