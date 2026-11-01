@@ -4,6 +4,8 @@ import ScreenCapKit
 /// What a key press does in a focused Quick Access panel (#129).
 enum QuickAccessKeyAction: Equatable {
     case command(QuickAccessCommand)
+    /// ⌘⌫ / ⌘⌦: delete without the unsaved-capture prompt (#147).
+    case confirmedDelete
     /// Focus the next older panel.
     case next
     /// Focus the next newer panel.
@@ -12,7 +14,8 @@ enum QuickAccessKeyAction: Equatable {
 
 /// Keyboard map for a focused Quick Access panel, kept pure so it is unit-tested.
 /// ⌘C copy, ⌘S save, ⌘E or Return annotate, ⌘P pin, ⌘T copy text, ⌘R show in Finder,
-/// ⌫ delete, Esc close, Tab / ⇧Tab and the arrow keys move between panels.
+/// ⌫ delete (asks first if never saved, #147), ⌘⌫ delete without asking, Esc close,
+/// Tab / ⇧Tab and the arrow keys move between panels.
 enum QuickAccessKeys {
     enum KeyCode {
         static let returnKey: UInt16 = 36
@@ -52,7 +55,7 @@ enum QuickAccessKeys {
         case KeyCode.escape:
             return mods.isEmpty ? .command(.close) : nil
         case KeyCode.delete, KeyCode.forwardDelete:
-            return mods.isEmpty || mods == .command ? .command(.delete) : nil
+            return mods.isEmpty ? .command(.delete) : mods == .command ? .confirmedDelete : nil
         case KeyCode.upArrow, KeyCode.downArrow, KeyCode.leftArrow, KeyCode.rightArrow:
             return mods.isEmpty ? arrow(keyCode, corner: corner) : nil
         default:
@@ -79,7 +82,7 @@ enum QuickAccessKeys {
         switch action {
         case .next: return (index + 1) % count
         case .previous: return (index - 1 + count) % count
-        case .command: return index
+        case .command, .confirmedDelete: return index
         }
     }
 }

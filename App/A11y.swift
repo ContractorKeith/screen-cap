@@ -99,6 +99,11 @@ enum A11y {
     /// Advanced → History retention popup (#132).
     static let historyRetention = "Keep captures for"
 
+    // MARK: Quick Access
+
+    /// The ask-before-deleting alert for an unsaved capture (#147).
+    static let quickAccessDeleteConfirmation = "Confirm delete of unsaved capture"
+
     // MARK: History
 
     static let historySearch = "Search captures"
