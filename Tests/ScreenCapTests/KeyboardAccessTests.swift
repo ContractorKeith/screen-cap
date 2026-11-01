@@ -31,8 +31,26 @@ struct QuickAccessKeyTests {
         #expect(action(Code.enter) == .command(.annotate))
         #expect(action(Code.escape) == .command(.close))
         #expect(action(Code.delete) == .command(.delete))
-        #expect(action(Code.delete, "", .command) == .command(.delete))
         #expect(action(Code.forwardDelete) == .command(.delete))
+    }
+
+    /// #147: ⌫ on a never-saved capture asks first; a saved one deletes; ⌘⌫ never asks.
+    @Test func deleteKeysConfirmOnlyForUnsavedCaptures() {
+        func step(_ code: UInt16, _ mods: NSEvent.ModifierFlags = [], saved: Bool) -> QuickAccessDeletion.Step? {
+            switch action(code, "", mods) {
+            case .command(.delete): QuickAccessDeletion.step(isSaved: saved, confirmed: false)
+            case .confirmedDelete: QuickAccessDeletion.step(isSaved: saved, confirmed: true)
+            default: nil
+            }
+        }
+        #expect(step(Code.delete, saved: false) == .confirm)
+        #expect(step(Code.forwardDelete, saved: false) == .confirm)
+        #expect(step(Code.delete, saved: true) == .delete)
+        #expect(step(Code.delete, .command, saved: false) == .delete)
+        #expect(step(Code.forwardDelete, .command, saved: false) == .delete)
+        #expect(step(Code.delete, .command, saved: true) == .delete)
+        #expect(action(Code.delete, "", .shift) == nil)
+        #expect(QuickAccessKeys.move(from: 1, by: .confirmedDelete, count: 3) == 1)
     }
 
     @Test func tabMovesBetweenPanels() {

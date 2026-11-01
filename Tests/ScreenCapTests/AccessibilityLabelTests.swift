@@ -59,10 +59,16 @@ struct AccessibilityLabelTests {
         #expect(A11y.historyRetention == "Keep captures for")
     }
 
+    /// #147: the Quick Access unsaved-delete alert.
+    @Test func quickAccessDeleteConfirmationLabel() {
+        #expect(A11y.quickAccessDeleteConfirmation == "Confirm delete of unsaved capture")
+    }
+
     @Test func otherLabelsAreHuman() {
         let labels = [A11y.arrowStyle, A11y.textStyle, A11y.cropAspect, A11y.inspectorPanel, A11y.pickScreenColor,
                       A11y.addToPalette, A11y.historySearch, A11y.historyGrid, A11y.background("Dusk"),
-                      A11y.alignment(.topLeft), A11y.resizeWidth, A11y.resizeHeight, A11y.historyRetention]
+                      A11y.alignment(.topLeft), A11y.resizeWidth, A11y.resizeHeight, A11y.historyRetention,
+                      A11y.quickAccessDeleteConfirmation]
         for label in labels { #expect(!Self.looksLikeSymbol(label), "\(label)") }
     }
 }

@@ -89,6 +89,8 @@ extension QuickAccessController {
         switch action {
         case let .command(command):
             perform(command, on: item)
+        case .confirmedDelete:
+            requestDelete(item, confirmed: true, refocus: visibleItems.firstIndex { $0 === item })
         case .next, .previous:
             let visible = visibleItems
             guard let index = visible.firstIndex(where: { $0 === item }) else { return true }
@@ -191,6 +193,23 @@ extension QuickAccessController {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    /// Delete from the button or ⌫ asks first when the capture was never saved; ⌘⌫ doesn't (#147).
+    /// Cancel gives keyboard focus back to the panel.
+    private func requestDelete(_ item: QuickAccessItem, confirmed: Bool, refocus: Int?) {
+        let step = QuickAccessDeletion.step(isSaved: item.savedURL != nil, confirmed: confirmed)
+        if step == .confirm {
+            // Keep the panel from auto-closing behind the alert.
+            item.timer.pause(at: Date())
+            let delete = QuickAccessDeletePrompt.ask()
+            if !item.isHovered, !QuickAccessVisibility.isHidden { item.timer.resume(at: Date()) }
+            guard delete else {
+                if refocus != nil, items.contains(where: { $0 === item }) { item.panel.focusForKeyboard() }
+                return
+            }
+        }
+        Task { await delete(item); focusAfterRemoving(item, at: refocus) }
+    }
+
     /// Removes the record from history and moves a file saved from this panel to the Trash.
     /// Either failing shows why in a HUD (#105); the panel is already gone by then.
     private func delete(_ item: QuickAccessItem) async {
@@ -232,6 +251,26 @@ extension QuickAccessController {
         ]
         if let id = item.result.historyRecordID { info[QuickAccessUserInfo.recordID] = id }
         NotificationCenter.default.post(name: .captureTextRequested, object: nil, userInfo: info)
+    }
+}
+
+/// The ask-before-deleting alert for a capture never saved to a file (#147), worded like History's.
+/// Delete answers to ⌘⌫, Cancel to Esc; Return does nothing, so a habitual Return can't delete.
+@MainActor
+enum QuickAccessDeletePrompt {
+    static func ask() -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete this capture? It hasn't been saved."
+        alert.informativeText = "It's removed from history, so it can't be restored."
+        let delete = alert.addButton(withTitle: "Delete")
+        delete.hasDestructiveAction = true
+        delete.keyEquivalent = "\u{8}"
+        delete.keyEquivalentModifierMask = .command
+        alert.addButton(withTitle: "Cancel")
+        alert.window.setAccessibilityLabel(A11y.quickAccessDeleteConfirmation)
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }
 

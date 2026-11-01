@@ -118,7 +118,8 @@ All use ⌃⇧ so they never clash with macOS's ⇧⌘3/4/5. Change them in Sett
 | Focus Quick Access | ⌃⇧Q |
 
 **Keyboard.** In a focused Quick Access panel: ⌘C copy, ⌘S save, ⌘E or Return annotate, ⌘P pin,
-⌘T copy text, ⌘R show in Finder, ⌫ delete, Esc close, Tab or the arrows for the next panel.
+⌘T copy text, ⌘R show in Finder, ⌫ delete (asks first if the capture was never saved), ⌘⌫ delete
+without asking, Esc close, Tab or the arrows for the next panel.
 In History: arrows move (⇧ extends the selection), Return opens in the editor, Space previews,
 ⌘C copies, ⌘A selects all, ⌫ deletes.
 
