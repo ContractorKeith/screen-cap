@@ -98,10 +98,12 @@ enum ScrollFixtures {
         }
         let length = axis == .vertical ? height : width
         let breadth = axis == .vertical ? width : height
+        // Vertical lines are rows: copy them whole, a per-pixel map is slow in debug (#140).
+        if axis == .vertical {
+            return (0..<length).map { Array(pixels[$0 * width..<($0 + 1) * width]) }
+        }
         return (0..<length).map { lineIndex in
-            (0..<breadth).map { index in
-                axis == .vertical ? pixels[lineIndex * width + index] : pixels[index * width + lineIndex]
-            }
+            (0..<breadth).map { index in pixels[index * width + lineIndex] }
         }
     }
 

@@ -13,9 +13,14 @@ struct AutoScrollStitchTests {
 
     /// Keeps alpha and the top 6 bits of each channel: the dither only flips the lowest two.
     static func rowHash(_ line: Line) -> Int {
-        line.withUnsafeBufferPointer { pixels in
+        // Masks into a buffer and hashes its bytes in one call: per-pixel `combine` is slow in debug (#140).
+        var masked = line
+        masked.withUnsafeMutableBufferPointer { pixels in
+            for index in pixels.indices { pixels[index] &= 0xfffc_fcfc }
+        }
+        return masked.withUnsafeBytes { bytes in
             var hasher = Hasher()
-            for pixel in pixels { hasher.combine(pixel & 0xfffc_fcfc) }
+            hasher.combine(bytes: bytes)
             return hasher.finalize()
         }
     }
@@ -73,18 +78,19 @@ struct AutoScrollStitchTests {
         var pixels = [UInt32](repeating: 0, count: width * viewport)
         let knobLength = viewport / 3
         let knobTop = (viewport - knobLength) * top / max(1, page.count - viewport)
+        let knobPixel = ScrollFixtures.pixel(110, 110, 110)
+        // The dither tile spread across the frame's width, masked once: 64 rows (#140, debug speed).
+        let tiled = (0..<64 * width).map { dither[($0 / width) * 64 + $0 % width % 64] & noise }
         pixels.withUnsafeMutableBufferPointer { output in
-            dither.withUnsafeBufferPointer { dither in
+            tiled.withUnsafeBufferPointer { tiled in
                 for row in 0..<viewport {
+                    let out = output.baseAddress! + row * width // swiftlint:disable:this force_unwrapping
+                    let mask = tiled.baseAddress! + (row % 64) * width // swiftlint:disable:this force_unwrapping
                     page[top + row].withUnsafeBufferPointer { line in
-                        let tile = (row % 64) * 64
-                        for column in 0..<width {
-                            let inKnob = knob && column >= width - 22 && column < width - 6
-                                && (knobTop..<knobTop + knobLength).contains(row)
-                            let pixel = inKnob ? ScrollFixtures.pixel(110, 110, 110) : line[column]
-                            output[row * width + column] = pixel ^ (dither[tile + column % 64] & noise)
-                        }
+                        for column in 0..<width { out[column] = line[column] ^ mask[column] }
                     }
+                    guard knob, row >= knobTop, row < knobTop + knobLength else { continue }
+                    for column in max(0, width - 22)..<(width - 6) { out[column] = knobPixel ^ mask[column] }
                 }
             }
         }
@@ -117,6 +123,35 @@ struct AutoScrollStitchTests {
                 sourceLocation: sourceLocation)
     }
 
+    // MARK: - Property: any step on a repeating page
+
+    /// Fixed seeds chosen to cover every ratio at small and large steps (#140; seed: ratio, posted
+    /// → moved px): 2: 1×, 183; 37: 1×, 345; 8: 1.5×, 40 → 60; 13: 1.5×, 142 → 213; 27: 1.5×, 257 →
+    /// 385; 4: 2×, 66 → 132; 24: 2×, 191 → 382. Plus one fresh seed each run, printed on failure.
+    static let seeds: [Int] = [2, 37, 8, 13, 27, 4, 24, Int.random(in: 40..<1_000_000)]
+
+    // #112: seeded random steps of 50–400 px, the page moving 1×, 1.5× or 2× the posted distance,
+    // over output that repeats for longer than the 600 px region: most frames see only `$ make test`.
+    @Test(arguments: seeds)
+    func randomStepsStitchExactly(seed: Int) async throws {
+        var random = SeededGenerator(seed: UInt64(seed) &+ 1000)
+        let ratio = [(1, 1), (3, 2), (2, 1)][Int(random.next() % 3)]
+        let posted = Int.random(in: (50 * ratio.1 + ratio.0 - 1) / ratio.0...400 * ratio.1 / ratio.0,
+                                using: &random)
+        let moved = posted * ratio.0 / ratio.1
+        let page = TerminalPage.repeating
+        let run = try await Self.autoScroll(page, viewport: 600, posted: posted, moved: moved)
+        #expect((50...400).contains(moved), "seed \(seed)")
+        Self.expectExact(run, page: page)
+    }
+}
+
+/// #112 on the issue's own page (1560 px region, 300 output lines), plus the original twelve seeds
+/// on the 120-row repeating page (#140). Run with `make test-slow`.
+@Suite("Auto-scroll on repetitive content, full pages", .tags(.slow))
+struct AutoScrollStitchSlowTests {
+    typealias Line = ScrollFixtures.Line
+
     // MARK: - The issue's fixture
 
     // #112: period-25 output, 120 pt auto-scroll step (240 px posted at 2x) that Terminal turns
@@ -124,16 +159,16 @@ struct AutoScrollStitchTests {
     // seam, and blocks repeated after seams (1000 × 10252 px instead of the page's height).
     @Test func issueFixtureStitchesEveryRowOnce() async throws {
         let page = TerminalPage.issue
-        let run = try await Self.autoScroll(page, viewport: 1560, posted: 240, moved: 360)
+        let run = try await AutoScrollStitchTests.autoScroll(page, viewport: 1560, posted: 240, moved: 360)
         #expect(run.measuredScale == 1.5)
         #expect(!run.outcomes.contains(.ambiguous) && !run.outcomes.contains(.unrelated), "\(run.outcomes)")
-        Self.expectExact(run, page: page)
+        AutoScrollStitchTests.expectExact(run, page: page)
 
         // Each `== build n ==` marker comes out exactly once, 24 output lines after the one before.
-        let stitched = run.lines.map(Self.rowHash)
+        let stitched = run.lines.map(AutoScrollStitchTests.rowHash)
         var starts: [Int] = []
         for row in TerminalPage.markerRows {
-            let block = page[row * 30..<(row + 1) * 30].map(Self.rowHash)
+            let block = page[row * 30..<(row + 1) * 30].map(AutoScrollStitchTests.rowHash)
             let found = stitched.indices.filter { start in
                 stitched[start] == block[0] && start + 30 <= stitched.count
                     && stitched[start..<start + 30].elementsEqual(block)
@@ -151,10 +186,11 @@ struct AutoScrollStitchTests {
     @Test(arguments: [(15, false), (12, true)])
     func jumpIsNeverRepeated(frame: Int, overlapHasMarker: Bool) async throws {
         let page = TerminalPage.issue
-        let run = try await Self.autoScroll(page, viewport: 1560, posted: 240, moved: 360, jumps: [frame: 1000])
-        let source = page.map(Self.rowHash)
+        let run = try await AutoScrollStitchTests.autoScroll(page, viewport: 1560, posted: 240, moved: 360,
+                                                             jumps: [frame: 1000])
+        let source = page.map(AutoScrollStitchTests.rowHash)
         let seamRed = ScrollFixtures.pixel(230, 40, 40)
-        let parts = run.lines.split { $0[0] == seamRed }.map { $0.map(Self.rowHash) }
+        let parts = run.lines.split { $0[0] == seamRed }.map { $0.map(AutoScrollStitchTests.rowHash) }
         if overlapHasMarker {
             // A marker in the overlap lines the jump up exactly: no seam.
             #expect(run.seams == 0)
@@ -170,21 +206,17 @@ struct AutoScrollStitchTests {
         #expect(before.count + after.count <= source.count, "rows after the seam repeat rows before it")
     }
 
-    // MARK: - Property: any step on a repeating page
-
-    // Seeded random steps of 50–400 px, the page moving 1×, 1.5× or 2× the posted distance, over
-    // output that repeats for longer than the 600 px region: most frames see only `$ make test`.
     @Test(arguments: 0..<12)
-    func randomStepsStitchExactly(seed: Int) async throws {
+    func randomStepsStitchExactlyOnTheFullPage(seed: Int) async throws {
         var random = SeededGenerator(seed: UInt64(seed) &+ 1000)
         let ratio = [(1, 1), (3, 2), (2, 1)][Int(random.next() % 3)]
         let posted = Int.random(in: (50 * ratio.1 + ratio.0 - 1) / ratio.0...400 * ratio.1 / ratio.0,
                                 using: &random)
         let moved = posted * ratio.0 / ratio.1
-        let page = TerminalPage.repeating
-        let run = try await Self.autoScroll(page, viewport: 600, posted: posted, moved: moved)
+        let page = TerminalPage.repeatingFull
+        let run = try await AutoScrollStitchTests.autoScroll(page, viewport: 600, posted: posted, moved: moved)
         #expect((50...400).contains(moved))
-        Self.expectExact(run, page: page)
+        AutoScrollStitchTests.expectExact(run, page: page)
     }
 }
 
@@ -202,12 +234,22 @@ enum TerminalPage {
     /// Text rows of `issue` holding a `== build n ==` marker.
     static let markerRows: [Int] = (1...300).filter { $0 % 25 == 0 }.map { header.count + $0 - 1 }
 
-    /// 20 unique lines, 80 lines of period-25 output, 20 unique lines; 400 px wide.
-    static let repeating: [Line] = render(
-        (0..<20).map { "Session \($0): \($0 * 7919 % 1000) ok" } + output(1...80)
-            + (0..<20).map { "Summary \($0): \($0 * 104_729 % 1000)" },
-        width: 400
-    )
+    /// `unique` unique lines, `output` lines of period-25 output, `unique` unique lines; 400 px wide.
+    static func repeating(unique: Int, output count: Int) -> [Line] {
+        render(
+            (0..<unique).map { "Session \($0): \($0 * 7919 % 1000) ok" } + output(1...count)
+                + (0..<unique).map { "Summary \($0): \($0 * 104_729 % 1000)" },
+            width: 400
+        )
+    }
+
+    /// 20 + 50 + 20 lines (#140): each run of `$ make test` (24 lines, 720 px) still outlasts the
+    /// 600 px region, so frames between markers see nothing else. Keep the 20 unique lines: with 10,
+    /// steps near 385 px end in a seam (see the PR for #140).
+    static let repeating: [Line] = repeating(unique: 20, output: 50)
+
+    /// The original 20 + 80 + 20 lines, for the slow tier.
+    static let repeatingFull: [Line] = repeating(unique: 20, output: 80)
 
     typealias Line = ScrollFixtures.Line
 

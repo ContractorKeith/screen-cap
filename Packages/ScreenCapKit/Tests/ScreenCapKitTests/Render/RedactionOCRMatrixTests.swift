@@ -86,10 +86,22 @@ struct RedactionOCRMatrixTests {
         #expect(try Self.leakedWords(in: exported).count >= 2, "\(fontSize) px")
     }
 
-    @Test(arguments: textSizes)
+    /// The weakest setting of each mode (#140): the full matrix runs in the slow tier.
+    static func minimumConfigs(_ rect: CGRect) -> [(name: String, kind: Annotation.Kind)] {
+        configs(rect).filter { $0.name == "secure r=2" || $0.name == "pixelate 4 random" }
+    }
+
+    // PLAN §5.6 at the weakest settings, smallest and largest text, 1x and 2x (#140; full matrix in
+    // `RedactionOCRMatrixSlowTests`).
+    @Test(arguments: [CGFloat(12), 72])
     func secureRedactionDefeatsOCR(fontSize: CGFloat) throws {
+        try Self.expectNothingLeaks(fontSize: fontSize, configs: Self.minimumConfigs)
+    }
+
+    static func expectNothingLeaks(fontSize: CGFloat,
+                                   configs: (CGRect) -> [(name: String, kind: Annotation.Kind)]) throws {
         let fixture = try Self.fixture(fontSize: fontSize)
-        for config in Self.configs(fixture.textRect) {
+        for config in configs(fixture.textRect) {
             for scale in Self.scales {
                 let exported = try Self.exportedPNG(fixture.image, kinds: [config.kind], scale: scale)
                 let leaked = try Self.leakedWords(in: exported)
@@ -110,5 +122,14 @@ struct RedactionOCRMatrixTests {
         // A 2x export doubles the rect, so the block doubles too: bigger exports aren't weaker.
         #expect(Redaction.secureBlockSize(requested: 4, rect: CGRect(x: 0, y: 0, width: 1800, height: 200),
                                           imageSize: size) == 80)
+    }
+}
+
+/// Every inspector setting at every text size (PLAN §5.6, #140). Run with `make test-slow`.
+@Suite("Redaction OCR matrix, every setting", .serialized, .tags(.slow))
+struct RedactionOCRMatrixSlowTests {
+    @Test(arguments: RedactionOCRMatrixTests.textSizes)
+    func secureRedactionDefeatsOCR(fontSize: CGFloat) throws {
+        try RedactionOCRMatrixTests.expectNothingLeaks(fontSize: fontSize, configs: RedactionOCRMatrixTests.configs)
     }
 }

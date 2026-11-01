@@ -1,5 +1,5 @@
 # SwiftPM-first build. See AGENTS.md for details.
-.PHONY: build test bundle dmg appcast run lint clean
+.PHONY: build test test-slow bundle dmg appcast run lint clean
 
 # Command Line Tools (no Xcode) keep Swift Testing outside SwiftPM's default search
 # paths, so plain `swift test` runs 0 tests there. Pass the paths explicitly in that case.
@@ -16,9 +16,17 @@ endif
 build:
 	swift build
 
+# Slow end-to-end suites (full-size scrolling pages, the whole OCR matrix) are tagged `.slow` and
+# named `…SlowTests`; SwiftPM can't filter by tag, so the name selects them (#140).
+SLOW_TESTS := SlowTests
+
 test:
 	# Serial, like CI: CPU-heavy suites starve the cooperative pool and time out blocking tests.
-	swift test --no-parallel $(TEST_FLAGS)
+	swift test --no-parallel --skip $(SLOW_TESTS) $(TEST_FLAGS)
+
+test-slow:
+	# The slow tier only: nightly CI and the release workflow run it (#140).
+	swift test --no-parallel --filter $(SLOW_TESTS) $(TEST_FLAGS)
 
 bundle:
 	scripts/bundle.sh
