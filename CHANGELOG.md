@@ -9,6 +9,8 @@ and versions follow [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+- Fixed crop snapping to detected window and panel edges while still discarding detection results after an edit (#154).
+
 ## [0.1.0] - Unreleased
 
 First release, not yet tagged. Ad-hoc signed, not notarized.
