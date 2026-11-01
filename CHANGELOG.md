@@ -9,6 +9,8 @@ and versions follow [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+- Reject ad-hoc app signatures whose designated requirement permits anything other than cdhash terms.
+
 ## [0.1.0] - Unreleased
 
 First release, not yet tagged. Ad-hoc signed, not notarized.

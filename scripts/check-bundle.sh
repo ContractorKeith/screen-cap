@@ -50,7 +50,10 @@ fi
 signature="$(codesign -dv "$APP" 2>&1 || true)"
 if [[ "$signature" == *$'\nSignature=adhoc'* ]]; then
   requirement="$(codesign -d -r- "$APP" 2>&1 | grep 'designated =>' || true)"
-  if [[ "$requirement" != *cdhash* ]]; then
+  # Accept only complete cdhash terms, never a weaker alternative hidden in a disjunction (#153).
+  cdhash_term='cdhash H"[[:xdigit:]]+"'
+  cdhash_only="^(# )?designated => ${cdhash_term}([[:space:]]+or[[:space:]]+${cdhash_term})*$"
+  if ! [[ "$requirement" =~ $cdhash_only ]]; then
     echo "Ad-hoc signature's designated requirement is not cdhash-anchored: ${requirement:-none}" >&2; fail=1
   fi
 fi
