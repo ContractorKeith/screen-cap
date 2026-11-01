@@ -59,6 +59,7 @@ public enum BackgroundCompositor {
         let imageSize = CGSize(width: image.width, height: image.height)
         let (canvas, frame) = layout(imageSize: imageSize, background: background, padding: padding,
                                      aspectRatio: aspectRatio)
+        guard DocumentLimits.size(canvas) else { throw ProjectFileError.invalidGeometry("background geometry") }
         let bitmap = try EffectsBitmap(width: Int(canvas.width), height: Int(canvas.height))
         let context = bitmap.context
         let full = CGRect(origin: .zero, size: canvas)

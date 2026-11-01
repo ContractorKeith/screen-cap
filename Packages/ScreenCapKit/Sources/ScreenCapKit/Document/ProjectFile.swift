@@ -15,6 +15,7 @@ public enum ProjectFileError: Error, Equatable {
     case missingLayer(String)
     case imageEncodingFailed(String)
     case imageDecodingFailed(String)
+    case invalidGeometry(String)
 }
 
 /// Contents of a `.screencap` package once read.

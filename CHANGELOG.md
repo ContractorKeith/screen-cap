@@ -10,6 +10,7 @@ and versions follow [Semantic Versioning](https://semver.org).
 ## [Unreleased]
 
 - Reject ad-hoc app signatures whose designated requirement permits anything other than cdhash terms.
+- Reject malformed project dimensions and geometry with a readable error; guard render sizing against numeric conversion crashes (#151).
 
 ## [0.1.0] - Unreleased
 

@@ -74,6 +74,25 @@ same thing.
 - **Order.** `annotations` is in creation order; counters are numbered 1…n in this order.
   Drawing order is ascending `zIndex`, ties broken by array order.
 
+## Numeric limits
+
+Readers reject invalid geometry with a readable `ProjectFileError` before rendering:
+
+- Canvas and base image dimensions must be finite and positive, at most **65,536 pixels
+  per edge** and **100,000,000 pixels total**. Base image dimensions are integers.
+- Source and render scales must be finite, from **1/65,536 through 16**. Rendered output
+  also obeys the edge and total pixel caps after scaling and rounding.
+- Coordinates and shadow offsets must be finite and within **−65,536…65,536** pixels.
+  Rectangle widths/heights, padding (including each edge), corner/blur/shadow radii and
+  stroke widths must be finite and in **0…65,536**. Font sizes, counter radii and pixelate
+  block sizes must be positive within that range. Zero-size annotation rectangles and
+  paths with no points remain valid; negative coordinates are allowed.
+- The base image plus resolved padding must also fit the canvas dimension and pixel caps.
+
+These limits apply to schema 1 without changing its encoding. NaN and infinities are not
+JSON numbers; neither strings representing them nor non-finite values from a custom decoder
+are accepted as geometry.
+
 ## Versioning
 
 `schemaVersion` is an integer at the top level. A reader must check it before decoding
