@@ -98,7 +98,7 @@ jobs:
           ---
           This build is ad-hoc signed, not notarized, so macOS blocks the first launch.
           macOS 15 and later: open it once, then System Settings → Privacy & Security → Open Anyway,
-          or run `xattr -dr com.apple.quarantine /Applications/ScreenCap.app`.
+          or run `xattr -d com.apple.quarantine /Applications/ScreenCap.app`.
           macOS 14: right-click ScreenCap.app → Open → Open.
           NOTES
 
