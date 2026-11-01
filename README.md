@@ -60,7 +60,7 @@ ScreenCap to Applications.
 - **macOS 15 and later:** open ScreenCap once and click **Done** on the "Not Opened" dialog.
   Then go to **System Settings → Privacy & Security**, scroll to "ScreenCap was blocked…",
   click **Open Anyway**, authenticate, and open ScreenCap again. Or, in Terminal:
-  `xattr -dr com.apple.quarantine /Applications/ScreenCap.app`
+  `xattr -d com.apple.quarantine /Applications/ScreenCap.app`
 - **macOS 14:** right-click ScreenCap.app → **Open** → **Open**.
 
 After that it opens normally. Each new version you download needs this once more.
@@ -81,10 +81,18 @@ the Releases page.
 
 ## First run
 
-1. ScreenCap asks for **Screen Recording** permission and opens the right pane in System
-   Settings. Turn it on; macOS may ask you to quit and reopen the app.
-2. The welcome window then shows the main shortcuts and a **Take Your First Screenshot**
-   button. Tick "Don't show again" to skip it next time; **Welcome…** in the menu brings it back.
+1. The welcome window asks for **Screen Recording** permission, with **Later** and
+   **Open System Settings** buttons. Click **Open System Settings**, then turn ScreenCap on in
+   Privacy & Security → Screen & System Audio Recording. macOS may ask you to quit and reopen it.
+2. Once permission is on, the same window shows the main shortcuts and a **Take Your First
+   Screenshot** button. Tick "Don't show again" to skip it next time; **Welcome…** in the menu
+   brings it back.
+
+**After an update.** Until builds are Developer ID signed, macOS may treat a new version as a new
+app: the old ScreenCap toggle stays on but no longer applies, and the welcome window says
+"ScreenCap was updated". Run `tccutil reset ScreenCapture com.contractorkeith.screencap` in
+Terminal (the window has a **Copy Command** button), then click **Open System Settings** and turn
+ScreenCap on again. Selecting the old entry and clicking **–** works too.
 
 **Accessibility** is requested only the first time you use auto-scroll in scrolling capture,
 because scrolling for you means posting scroll events. Nothing else is requested.
@@ -105,6 +113,12 @@ All use ⌃⇧ so they never clash with macOS's ⇧⌘3/4/5. Change them in Sett
 | Capture Text | ⌃⇧O |
 | Open History | ⌃⇧H |
 | Hide/Show Overlays | ⌃⇧X |
+| Focus Quick Access | ⌃⇧Q |
+
+**Keyboard.** In a focused Quick Access panel: ⌘C copy, ⌘S save, ⌘E or Return annotate, ⌘P pin,
+⌘T copy text, ⌘R show in Finder, ⌫ delete, Esc close, Tab or the arrows for the next panel.
+In History: arrows move (⇧ extends the selection), Return opens in the editor, Space previews,
+⌘C copies, ⌘A selects all, ⌫ deletes.
 
 ## Automation
 
@@ -128,7 +142,8 @@ make dmg        # dist/ScreenCap-<version>.dmg
 make lint       # swiftlint --strict
 ```
 
-Ad-hoc signatures change on every rebuild, so re-grant Screen Recording after a clean build.
+Builds are ad-hoc signed with a fixed identifier and designated requirement, so a rebuild can
+keep its Screen Recording grant. If macOS asks again anyway, reset it as in "After an update" above.
 If Xcode is installed but its license isn't accepted, run
 `export DEVELOPER_DIR=/Library/Developer/CommandLineTools` first.
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Not sandboxed and needs no special entitlements. bundle.sh signs with this file on every
+     build so the signature's contents stay the same from one build to the next (#141). -->
+<dict/>
+</plist>

@@ -18,7 +18,7 @@ private let repoRoot = URL(fileURLWithPath: #filePath)
 @MainActor
 struct SettingsResetRegressionTests {
     /// UserDefaults keys that are deliberately not settings (see SettingsKeys' doc comment).
-    static let notSettings: Set<String> = ["welcome.dontShowAgain"]
+    static let notSettings: Set<String> = ["welcome.dontShowAgain", "permission.grantedBuild"]
 
     /// Every UserDefaults key literal declared in App/: `static let …Key = "…"` and string-backed
     /// key enums (`case x = "scrolling.x"`), plus the editor's `editor.<name>` keys.

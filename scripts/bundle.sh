@@ -36,12 +36,26 @@ swift scripts/make-icon.swift "$ICONSET"
 iconutil -c icns "$ICONSET" -o "$CONTENTS/Resources/AppIcon.icns"
 
 plutil -lint "$CONTENTS/Info.plist" >/dev/null
-# Ad-hoc by default. --deep also signs Sparkle's nested helpers (Autoupdate, Updater.app, XPC services).
+# SwiftPM copies some resources read-only (0444); make everything user-writable so
+# `xattr -d com.apple.quarantine` and later updates can touch every file (#142).
+chmod -R u+w "$APP"
+
+# Sparkle's nested helpers (Autoupdate, Updater.app, XPC services) are signed first, on their own,
+# so the app's identifier and requirement below don't leak into them.
+ID="com.contractorkeith.screencap"
+ENTITLEMENTS="App/Resources/ScreenCap.entitlements"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
-  codesign --force --deep --sign - "$APP"
+  codesign --force --deep --sign - "$CONTENTS/Frameworks/Sparkle.framework"
+  # Ad hoc: the default designated requirement is the cdhash, which changes every build, so macOS
+  # treats each build as a new app for Screen Recording. Pin it to the bundle identifier (#141).
+  codesign --force --sign - --identifier "$ID" --entitlements "$ENTITLEMENTS" \
+    --requirements "=designated => identifier \"$ID\"" "$APP"
 else
-  codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
+  codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" \
+    "$CONTENTS/Frameworks/Sparkle.framework"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" --identifier "$ID" \
+    --entitlements "$ENTITLEMENTS" "$APP"
 fi
 codesign --verify --verbose=1 "$APP"
 scripts/check-bundle.sh "$APP" "$BIN_DIR"

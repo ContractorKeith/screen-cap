@@ -9,8 +9,9 @@ v1 in the feature matrix in `docs/PLAN.md`.
 First working build (2026-10-31): M0–M7 merged, 337 tests green. Capture (area/window/fullscreen/
 previous/timer/all-in-one/scrolling), Quick Access, Annotate editor, OCR/QR, pins, history, URL
 scheme, settings all run from `make run`. M8 ship (#29): DMG, release workflow, Sparkle (off until keyed), cask, README. Next: real-world QA passes.
-Grant Screen Recording to `build/ScreenCap.app` once in System Settings; ad-hoc signatures change
-per rebuild, so re-grant after `make clean`.
+Grant Screen Recording to `build/ScreenCap.app` once in System Settings. bundle.sh pins the ad-hoc
+designated requirement to the bundle ID (#141) so rebuilds can keep it; if macOS still asks, run
+`tccutil reset ScreenCapture com.contractorkeith.screencap` and re-grant.
 
 ## Pointers
 - `docs/PLAN.md` — the build plan: feature matrix, architecture, milestones, acceptance.

@@ -68,3 +68,29 @@ struct WelcomePolicyTests {
         #expect(WelcomePolicy.mainShortcuts.map(\.title) == ["Capture Area", "Capture Window", "Capture Fullscreen"])
     }
 }
+
+@Suite("Re-grant after update (#141)")
+struct PermissionRegrantTests {
+    @Test func deniedAfterAnEarlierBuildHadItIsAnUpdate() {
+        #expect(PermissionRegrant.wasUpdated(granted: false, grantedBuild: "52", currentBuild: "53"))
+    }
+
+    @Test func firstRunAndSameBuildAreNotUpdates() {
+        #expect(!PermissionRegrant.wasUpdated(granted: false, grantedBuild: nil, currentBuild: "53"))
+        #expect(!PermissionRegrant.wasUpdated(granted: false, grantedBuild: "53", currentBuild: "53"))
+        #expect(!PermissionRegrant.wasUpdated(granted: true, grantedBuild: "52", currentBuild: "53"))
+    }
+
+    @Test func recordsOnlyWhenGranted() {
+        let suite = TemporaryDefaults()
+        defer { suite.remove() }
+        PermissionRegrant.record(granted: false, defaults: suite.store)
+        #expect(suite.store.string(forKey: PermissionRegrant.grantedBuildKey) == nil)
+        PermissionRegrant.record(granted: true, defaults: suite.store)
+        #expect(suite.store.string(forKey: PermissionRegrant.grantedBuildKey) == PermissionRegrant.currentBuild)
+    }
+
+    @Test func resetCommandTargetsThisApp() {
+        #expect(PermissionRegrant.resetCommand == "tccutil reset ScreenCapture com.contractorkeith.screencap")
+    }
+}
