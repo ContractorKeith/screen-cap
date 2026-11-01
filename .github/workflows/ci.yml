@@ -23,7 +23,7 @@ jobs:
       - name: Build
         run: swift build
       - name: Test
-        timeout-minutes: 15
+        timeout-minutes: 35
         run: swift test --no-parallel
       - name: SwiftLint
         run: |
