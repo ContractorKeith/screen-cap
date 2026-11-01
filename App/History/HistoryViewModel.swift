@@ -21,19 +21,20 @@ final class HistoryViewModel {
 
     @ObservationIgnored private let store: HistoryStore?
     @ObservationIgnored private let retentionDays: @MainActor () -> Int
-    @ObservationIgnored private let now: () -> Date
+    @ObservationIgnored private let showFailure: (String) -> Void
 
-    init(store: HistoryStore?, retentionDays: @escaping @MainActor () -> Int, now: @escaping () -> Date = Date.init) {
+    init(store: HistoryStore?, retentionDays: @escaping @MainActor () -> Int,
+         showFailure: @escaping (String) -> Void = { HUDPanel.show($0, duration: .seconds(6)) }) {
         self.store = store
         self.retentionDays = retentionDays
-        self.now = now
+        self.showFailure = showFailure
     }
 
     var isAvailable: Bool { store != nil }
 
     /// Records matching the filter and search, newest first.
     var visible: [CaptureRecord] {
-        Self.filter(records, kind: kindFilter, query: query, retentionDays: retentionDays(), now: now())
+        Self.filter(records, kind: kindFilter, query: query)
     }
 
     var selectedRecords: [CaptureRecord] {
@@ -66,14 +67,13 @@ final class HistoryViewModel {
 
     // MARK: - Pure rules
 
-    /// Not deleted, within the retention window, of `kind` (nil = all), matching `query`
+    /// Not deleted, of `kind` (nil = all), matching `query`. The store enforces retention,
+    /// keeping captures it could not delete available for retry. Searches are
     /// over OCR text, app name and window title (case- and diacritic-insensitive). Newest first.
-    static func filter(_ records: [CaptureRecord], kind: HistoryKind?, query: String, retentionDays: Int,
-                       now: Date) -> [CaptureRecord] {
-        let cutoff = now.addingTimeInterval(-Double(retentionDays) * 86_400)
+    static func filter(_ records: [CaptureRecord], kind: HistoryKind?, query: String) -> [CaptureRecord] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return records
-            .filter { !$0.isDeleted && $0.createdAt >= cutoff }
+            .filter { !$0.isDeleted }
             .filter { kind == nil || $0.kind == kind }
             .filter { trimmed.isEmpty || matches($0, query: trimmed) }
             .sorted { $0.createdAt > $1.createdAt }
@@ -158,10 +158,14 @@ final class HistoryViewModel {
 
     func delete(_ ids: Set<UUID>) async {
         guard let store else { return }
+        var removed: [UUID] = []
         for id in ids {
-            do { try await store.delete(id: id) } catch { log("delete", error) }
+            do {
+                try await store.delete(id: id)
+                removed.append(id)
+            } catch { log("delete", error) }
         }
-        TempFiles.shared.release(records: ids) // temp copies of deleted captures (#114)
+        TempFiles.shared.release(records: removed) // temp copies of deleted captures (#114)
         await reload()
     }
 
@@ -183,6 +187,10 @@ final class HistoryViewModel {
     }
 
     private func log(_ verb: String, _ error: Error) {
+        if case let HistoryError.filesNotRemoved(_, removed) = error {
+            TempFiles.shared.release(records: removed)
+        }
+        showFailure(error.localizedDescription)
         appLog.error("History \(verb, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
     }
 }

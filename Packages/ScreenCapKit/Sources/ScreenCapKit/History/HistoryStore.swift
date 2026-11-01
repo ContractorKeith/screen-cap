@@ -5,6 +5,7 @@ import ImageIO
 /// Errors from the capture history store.
 public enum HistoryError: Error, Equatable {
     case recordNotFound(UUID)
+    case filesNotRemoved(paths: [String], removedIDs: [UUID])
     case thumbnailFailed
     /// The History folder exists but this user can't write to it.
     case folderNotWritable(String)
@@ -15,6 +16,9 @@ extension HistoryError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .recordNotFound: "The capture isn't in History any more."
+        case let .filesNotRemoved(paths, _):
+            "Couldn't remove History files: \(paths.joined(separator: ", ")). "
+                + "Unlock them or check their permissions and try again."
         case .thumbnailFailed: "Couldn't make the History thumbnail."
         case let .folderNotWritable(path): "The History folder can't be written to (\(path))."
         }
@@ -37,29 +41,31 @@ public actor HistoryStore {
     public nonisolated let directory: URL
     private let now: @Sendable () -> Date
     private var index: [CaptureRecord]
-    /// Days to keep; nil keeps everything. Reads purge anything older first (#86).
+    private let onRemovalFailure: @Sendable (HistoryError) -> Void
+    /// Days to keep; nil keeps everything. Reads attempt to purge older files first (#86).
     public private(set) var retentionDays: Int?
 
     /// Opens (or creates) the store, rebuilding a corrupt index and purging records older
     /// than `retentionDays`. Pass `retentionDays: nil` to skip the auto-purge.
+    /// Startup and read-time removal failures go to `onRemovalFailure`; failed records stay indexed.
     public init(
         directory: URL = HistoryStore.defaultDirectory,
         retentionDays: Int? = HistoryStore.defaultRetentionDays,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        onRemovalFailure: @escaping @Sendable (HistoryError) -> Void = { _ in }
     ) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var records = try Self.loadIndex(in: directory, now: now())
-        var changed = false
         if let retentionDays {
-            let cutoff = Self.cutoff(days: retentionDays, now: now())
-            let expired = records.filter { $0.createdAt < cutoff }
-            expired.forEach(Self.removeFiles)
-            records.removeAll { $0.createdAt < cutoff }
-            changed = !expired.isEmpty
+            let result = Self.removeExpired(&records, days: retentionDays, now: now())
+            if !result.removed.isEmpty { try Self.writeIndex(records, in: directory) }
+            if !result.failures.isEmpty {
+                onRemovalFailure(.filesNotRemoved(paths: result.failures, removedIDs: result.removed))
+            }
         }
-        if changed { try Self.writeIndex(records, in: directory) }
         self.directory = directory
         self.now = now
+        self.onRemovalFailure = onRemovalFailure
         self.index = records
         self.retentionDays = retentionDays
     }
@@ -155,8 +161,9 @@ public actor HistoryStore {
     @discardableResult
     public func delete(id: UUID) throws -> CaptureRecord {
         guard let position = index.firstIndex(where: { $0.id == id }) else { throw HistoryError.recordNotFound(id) }
-        var record = index.remove(at: position)
-        Self.removeFiles(record)
+        var record = index[position]
+        try Self.removeFiles(record)
+        index.remove(at: position)
         try save()
         record.isDeleted = true
         return record
@@ -168,16 +175,15 @@ public actor HistoryStore {
         return index.count { $0.createdAt < cutoff }
     }
 
-    /// Deletes every record created more than `days` days ago. Returns the removed IDs.
+    /// Deletes records older than `days`. Failed files stay indexed; the error includes removed IDs.
     @discardableResult
     public func purge(olderThan days: Int = HistoryStore.defaultRetentionDays) throws -> [UUID] {
-        let cutoff = Self.cutoff(days: days, now: now())
-        let expired = index.filter { $0.createdAt < cutoff }
-        guard !expired.isEmpty else { return [] }
-        expired.forEach(Self.removeFiles)
-        index.removeAll { $0.createdAt < cutoff }
-        try save()
-        return expired.map(\.id)
+        let result = Self.removeExpired(&index, days: days, now: now())
+        if !result.removed.isEmpty { try save() }
+        if !result.failures.isEmpty {
+            throw HistoryError.filesNotRemoved(paths: result.failures, removedIDs: result.removed)
+        }
+        return result.removed
     }
 
     /// Changes the retention window and purges right away.
@@ -188,7 +194,7 @@ public actor HistoryStore {
     }
 
     /// Deletes records older than `retentionDays` (files and index). Run periodically while the
-    /// app stays open; reads also call it so expired captures never resurface.
+    /// app stays open; failed removals remain available for retry.
     @discardableResult
     public func purgeExpired() throws -> [UUID] {
         guard let retentionDays else { return [] }
@@ -198,12 +204,10 @@ public actor HistoryStore {
     // MARK: - Private
 
     private func purgeExpiredQuietly() {
-        do { try purgeExpired() } catch {
-            // The index write failed; still hide what's expired so it can't be restored.
-            if let retentionDays {
-                let cutoff = Self.cutoff(days: retentionDays, now: now())
-                index.removeAll { $0.createdAt < cutoff }
-            }
+        do { try purgeExpired() } catch let error as HistoryError {
+            onRemovalFailure(error)
+        } catch {
+            // Keep the remaining records available if the index cannot be written.
         }
     }
 
@@ -288,9 +292,37 @@ extension HistoryStore {
         }
     }
 
-    private static func removeFiles(_ record: CaptureRecord) {
-        try? FileManager.default.removeItem(at: record.fileURL)
-        try? FileManager.default.removeItem(at: record.thumbnailURL)
+    /// Missing files already satisfy deletion; every other failure keeps the record retryable.
+    private static func removeFiles(_ record: CaptureRecord) throws {
+        for url in [record.fileURL, record.thumbnailURL] {
+            do { try FileManager.default.removeItem(at: url) } catch {
+                let failure = error as NSError
+                guard failure.domain == NSCocoaErrorDomain && failure.code == NSFileNoSuchFileError else {
+                    throw HistoryError.filesNotRemoved(paths: [url.path], removedIDs: [])
+                }
+            }
+        }
+    }
+
+    /// Continue past locked captures, removing only successfully deleted records from the index.
+    private static func removeExpired(_ records: inout [CaptureRecord], days: Int, now: Date)
+        -> (removed: [UUID], failures: [String]) {
+        let cutoff = cutoff(days: days, now: now)
+        var removed: [UUID] = []
+        var failures: [String] = []
+        for record in records where record.createdAt < cutoff {
+            do {
+                try removeFiles(record)
+                removed.append(record.id)
+            } catch let HistoryError.filesNotRemoved(paths, _) {
+                failures.append(contentsOf: paths)
+            } catch {
+                failures.append(record.fileURL.path)
+            }
+        }
+        let removedIDs = Set(removed)
+        records.removeAll { removedIDs.contains($0.id) }
+        return (removed, failures)
     }
 
     /// Size in bytes of a file, or of everything inside a directory (project packages).

@@ -18,17 +18,15 @@ struct HistoryViewModelTests {
                              closedAt: closed ? Self.now : nil)
     }
 
-    private func filter(_ records: [CaptureRecord], kind: HistoryKind? = nil, query: String = "",
-                        days: Int = 30) -> [CaptureRecord] {
-        HistoryViewModel.filter(records, kind: kind, query: query, retentionDays: days, now: Self.now)
+    private func filter(_ records: [CaptureRecord], kind: HistoryKind? = nil, query: String = "") -> [CaptureRecord] {
+        HistoryViewModel.filter(records, kind: kind, query: query)
     }
 
-    @Test func newestFirstWithinRetention() {
+    @Test func newestFirstIncludingFailedRetentionCandidates() {
         let old = record(.area, daysAgo: 31)
         let mid = record(.area, daysAgo: 5)
         let new = record(.window, daysAgo: 1)
-        #expect(filter([old, mid, new]).map(\.id) == [new.id, mid.id])
-        #expect(filter([old, mid, new], days: 2).map(\.id) == [new.id])
+        #expect(filter([old, mid, new]).map(\.id) == [new.id, mid.id, old.id])
     }
 
     @Test func filtersByKind() {
@@ -83,10 +81,10 @@ struct HistoryViewModelTests {
         let kept = try await store.add(image: image, kind: .window, metadata: CaptureMetadata(appName: "Notes"))
         try await store.markClosed(id: kept.id)
 
-        let model = HistoryViewModel(store: store, retentionDays: { 30 }, now: { Self.now })
+        let model = HistoryViewModel(store: store, retentionDays: { 30 })
         await model.reload()
         #expect(model.records.count == 2)
-        #expect(model.visible.map(\.id) == [kept.id])
+        #expect(model.visible.map(\.id) == [kept.id, old.id])
         #expect(model.storageBytes > 0)
 
         model.selection = [kept.id]

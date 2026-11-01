@@ -9,6 +9,8 @@ and versions follow [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+- Keep History records when file deletion fails, continue retention cleanup, and show failures in a HUD (#152).
+
 ## [0.1.0] - Unreleased
 
 First release, not yet tagged. Ad-hoc signed, not notarized.
