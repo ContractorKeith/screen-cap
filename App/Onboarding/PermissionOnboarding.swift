@@ -18,8 +18,9 @@ enum ScreenRecordingPermission {
     }
 }
 
-/// Ad-hoc builds lose Screen Recording on update (#141): System Settings keeps the old
-/// ScreenCap toggle on, but it no longer matches the new app. Pure so the rule is testable.
+/// Ad-hoc builds lose Screen Recording on every update or rebuild (#141): macOS ties the grant to
+/// that exact build (its cdhash), so the old ScreenCap toggle stays on but no longer matches. That is
+/// deliberate (#146): only a Developer ID signature lets a grant safely carry over. Pure so the rule is testable.
 enum PermissionRegrant {
     /// The `CFBundleVersion` that last had permission.
     static let grantedBuildKey = "permission.grantedBuild"
@@ -122,7 +123,8 @@ struct PermissionOnboardingView: View {
             )
             .font(.title2.bold())
             Text(model.updatedSinceGrant ? """
-                macOS needs the Screen Recording permission re-granted for the new version. \
+                This build of ScreenCap isn't signed with a Developer ID, so macOS ties Screen Recording \
+                to the exact version you granted. Every new version needs it granted again. \
                 The old ScreenCap toggle in System Settings may still show on, but it no longer applies.
                 """ : """
                 ScreenCap needs Screen Recording permission to capture your screen. \
@@ -154,7 +156,7 @@ struct PermissionOnboardingView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(model.updatedSinceGrant
                  ? "1. Copy this command, paste it in Terminal and press Return:"
-                 : "Toggle already on? Updates need it again. Run this in Terminal:")
+                 : "Toggle already on? Each new version needs a fresh grant. Run this in Terminal:")
                 .font(model.updatedSinceGrant ? .body : .footnote)
             HStack {
                 Text(PermissionRegrant.resetCommand)
