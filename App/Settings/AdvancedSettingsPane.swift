@@ -113,8 +113,18 @@ struct AdvancedSettingsPane: View {
         guard let history else { return }
         let days = settings.historyRetentionDays
         Task {
-            let removed = (try? await history.purge(olderThan: days))?.count ?? 0
-            status = removed == 1 ? "Removed 1 capture" : "Removed \(removed) captures"
+            do {
+                let removed = try await history.purge(olderThan: days)
+                TempFiles.shared.release(records: removed)
+                status = removed.count == 1 ? "Removed 1 capture" : "Removed \(removed.count) captures"
+            } catch {
+                if case let HistoryError.filesNotRemoved(_, removed) = error {
+                    TempFiles.shared.release(records: removed)
+                }
+                status = error.localizedDescription
+                HUDPanel.show(error.localizedDescription, duration: .seconds(6))
+            }
+            NotificationCenter.default.post(name: .historyRecordsChanged, object: nil)
         }
     }
 }

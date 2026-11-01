@@ -14,6 +14,7 @@ and versions follow [Semantic Versioning](https://semver.org).
 - Fixed crop snapping to detected window and panel edges while still discarding detection results after an edit (#154).
 - Fix custom-image Background presets across documents by storing their images separately and importing them when applied.
 - Quick Access asks before deleting unsaved captures with Delete, forward Delete, or the toolbar; ⌘⌫ still skips confirmation (#150, #158).
+- Keep History records when file deletion fails, continue retention cleanup, and show failures in a HUD (#152).
 
 ## [0.1.0] - Unreleased
 
