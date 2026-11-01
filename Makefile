@@ -17,7 +17,8 @@ build:
 	swift build
 
 test:
-	swift test $(TEST_FLAGS)
+	# Serial, like CI: CPU-heavy suites starve the cooperative pool and time out blocking tests.
+	swift test --no-parallel $(TEST_FLAGS)
 
 bundle:
 	scripts/bundle.sh

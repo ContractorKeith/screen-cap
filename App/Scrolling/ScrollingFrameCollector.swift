@@ -36,6 +36,12 @@ final class ScrollingFrameCollector {
     private(set) var failure: (any Error)?
     /// Whether the last grabbed frame's pixels differ from the frame before it (true for the first).
     private(set) var lastFrameChanged = true
+    /// Whether the last grabbed frame differs from the one before beyond capture noise (true for the
+    /// first): live captures can vary by a level or two between grabs of a still page (#126).
+    private(set) var lastFrameChangedBeyondNoise = true
+    /// The last grabbed frame is one flat color, give or take noise: blank space shows nothing
+    /// moving, so it says nothing about where the content ends (#126).
+    private(set) var lastFrameIsBlank = false
     /// A seam was marked while stitching.
     private(set) var hasGap = false
     /// Pixels of the last grabbed frame, to tell a still page from a moving one byte for byte.
@@ -66,6 +72,8 @@ final class ScrollingFrameCollector {
         lastFrame = frame
         let pixels = Self.pixels(of: frame)
         lastFrameChanged = pixels == nil || pixels != lastPixels
+        lastFrameChangedBeyondNoise = Self.differ(pixels, lastPixels)
+        lastFrameIsBlank = Self.isBlank(pixels)
         lastPixels = pixels
         let motion = expectedStep(frame.scale)
         await active.setExpectedStep(motion?.posted, unit: motion?.unit)
@@ -74,17 +82,65 @@ final class ScrollingFrameCollector {
         return outcome
     }
 
+    /// Waits for the page to finish redrawing after a scroll (#126): captures until two grabs in a
+    /// row match within capture noise, at most `tries` times. Terminal animates its scrolling, and a
+    /// frame taken mid-animation shows the page between two positions.
+    /// False when a capture failed (`failure` is set).
+    func settle(tries: Int) async -> Bool {
+        guard failure == nil else { return false }
+        var previous: Data?
+        for _ in 0..<tries {
+            do {
+                let pixels = Self.pixels(of: try await source.captureArea(pointRect: region))
+                if let previous, let pixels, !Self.differ(previous, pixels) { return true }
+                previous = pixels
+            } catch {
+                failure = error
+                return false
+            }
+        }
+        return true
+    }
+
     /// Captures a frame without stitching it and reports whether it differs from the last
     /// grabbed frame (an end-of-content probe). Nil when the capture failed (`failure` is set).
     func peekChanged() async -> Bool? {
         guard failure == nil else { return nil }
         do {
             let frame = try await source.captureArea(pointRect: region)
-            let pixels = Self.pixels(of: frame)
-            return pixels == nil || pixels != lastPixels
+            return Self.differ(Self.pixels(of: frame), lastPixels)
         } catch {
             failure = error
             return nil
+        }
+    }
+
+    /// Byte difference that counts as a change; capture noise moves channels by one or two.
+    static let noiseLevel: UInt8 = 8
+
+    /// Whether every pixel is within capture noise of the first one (false when missing).
+    static func isBlank(_ pixels: Data?) -> Bool {
+        guard let pixels, pixels.count >= 4 else { return false }
+        return pixels.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) -> Bool in
+            for index in 4..<bytes.count {
+                let (value, first) = (bytes[index], bytes[index % 4])
+                if (value > first ? value - first : first - value) > noiseLevel { return false }
+            }
+            return true
+        }
+    }
+
+    /// Whether two bitmaps differ beyond capture noise; true when either is missing.
+    static func differ(_ one: Data?, _ other: Data?) -> Bool {
+        guard let one, let other, one.count == other.count else { return true }
+        return one.withUnsafeBytes { (first: UnsafeRawBufferPointer) -> Bool in
+            other.withUnsafeBytes { (second: UnsafeRawBufferPointer) -> Bool in
+                for index in 0..<first.count {
+                    let (left, right) = (first[index], second[index])
+                    if (left > right ? left - right : right - left) > noiseLevel { return true }
+                }
+                return false
+            }
         }
     }
 

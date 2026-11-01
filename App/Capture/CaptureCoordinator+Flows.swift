@@ -98,7 +98,7 @@ extension CaptureCoordinator {
         // Unfrozen, the magnifier samples small live regions instead (#62, #90).
         let sources = OverlaySources(kind: flow.kind, freezeScreen: settings.freezeScreen,
                                      showMagnifier: settings.showMagnifier)
-        let stills = sources.freezes ? try await source.captureAllDisplays() : []
+        let frozen = sources.freezes ? try await source.captureAllDisplays() : []
         let options = SelectionOptions(
             showsStill: sources.freezes,
             showsCrosshair: settings.showCrosshair,
@@ -107,9 +107,13 @@ extension CaptureCoordinator {
             startMode: flow.kind == .window ? .window : .area,
             previousRect: preselected ?? previousArea.rect(validIn: flow.geometry)
         )
-        let overlay = SelectionOverlay(stills: stills, geometry: flow.geometry, windows: windows, options: options,
+        let overlay = SelectionOverlay(stills: frozen, geometry: flow.geometry, windows: windows, options: options,
                                        sampler: sources.magnifier == .live ? ScreenPixelSampler() : nil)
-        switch await overlay.run() {
+        let outcome = await overlay.run()
+        // The displays may have changed while selecting (#131): cut with what the overlay ended on.
+        let stills = overlay.stills
+        let flow = Flow(kind: flow.kind, geometry: overlay.geometry, context: flow.context, action: flow.action)
+        switch outcome {
         case .cancelled:
             appLog.info("Selection cancelled")
         case let .window(window):

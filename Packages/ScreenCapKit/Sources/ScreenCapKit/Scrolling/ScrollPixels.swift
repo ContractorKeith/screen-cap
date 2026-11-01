@@ -125,6 +125,8 @@ struct LineProfiles {
     let tolerance: Int32
 
     static let maxBins = 32
+    /// Lines kept per class to compare new lines against (see `classify`).
+    static let maxRepresentatives = 16
     static let maxSamples = 256
     /// Luminance range a line needs to count as carrying detail.
     static let contrast = 24
@@ -151,45 +153,75 @@ struct LineProfiles {
     }
 
     /// Hashes for two frames' lines where equal values mean "the same line, give or take noise", so
-    /// `FrameAligner`'s hash-level search works on live captures. Each line joins the closest
-    /// representative it matches (dithered copies of one line are all within `tolerance` of each
-    /// other), so a slightly different neighbouring glyph row can't capture it.
+    /// `FrameAligner`'s hash-level search works on live captures.
+    ///
+    /// Lines that match within `tolerance` share a class, transitively: when a line matches several
+    /// classes, they merge. Picking only the closest one (as before #126) split lines that noise
+    /// can't tell apart, such as the top and bottom rows of an `o`: a dithered copy joined one class
+    /// in one frame and the other in the next, so ~4% of lines never matched at the true offset and
+    /// offsets a few text lines off scored as well on repeating output.
     static func classify(_ one: LineProfiles, _ other: LineProfiles) -> ([LineHash], [LineHash]) {
         guard one.bins == other.bins else { return ([], []) }
         var representatives: [(profiles: LineProfiles, line: Int)] = []
+        var parent: [Int] = []
         var buckets: [Int32: [Int]] = [:]
         let bucketSize = max(1, one.tolerance * Int32(one.bins))
+        func root(_ index: Int) -> Int {
+            var index = index
+            while parent[index] != index {
+                parent[index] = parent[parent[index]]
+                index = parent[index]
+            }
+            return index
+        }
+        var members: [Int: Int] = [:] // representatives per class root
         func classOf(_ profiles: LineProfiles, _ line: Int) -> Int {
             let key = profiles.totals[line] / bucketSize
-            var closest: (index: Int, distance: Int32)?
+            var joined: Int?
+            var exact = false
             for bucket in key - 1...key + 1 {
                 for index in buckets[bucket, default: []] {
                     let rep = representatives[index]
                     guard let distance = profiles.distance(line, rep.profiles, rep.line) else { continue }
-                    if distance == 0 { return index }
-                    if distance < closest?.distance ?? .max { closest = (index, distance) }
+                    exact = exact || distance == 0
+                    let found = root(index)
+                    if let current = joined, current != found {
+                        parent[found] = current
+                        members[current, default: 1] += members[found] ?? 1
+                    } else {
+                        joined = found
+                    }
                 }
             }
-            if let closest { return closest.index }
+            // A line that isn't an exact copy also represents its class (up to a few per class): a
+            // dithered copy of it may be within tolerance of it but not of the class's first line.
+            if let joined, exact || members[joined, default: 1] >= Self.maxRepresentatives { return joined }
             representatives.append((profiles, line))
-            buckets[key, default: []].append(representatives.count - 1)
-            return representatives.count - 1
+            let index = representatives.count - 1
+            parent.append(joined ?? index)
+            buckets[key, default: []].append(index)
+            if let joined { members[joined, default: 1] += 1 }
+            return joined ?? index
         }
-        func hashes(_ profiles: LineProfiles) -> [LineHash] {
-            (0..<profiles.count).map { line in
-                LineHash(value: UInt64(classOf(profiles, line)), isInformative: profiles.informative[line])
-            }
+        let first = (0..<one.count).map { classOf(one, $0) }
+        let second = (0..<other.count).map { classOf(other, $0) }
+        // Roots are only final once every line is in: a later line can merge two earlier classes.
+        func hashes(_ classes: [Int], _ profiles: LineProfiles) -> [LineHash] {
+            classes.indices.map { LineHash(value: UInt64(root(classes[$0])), isInformative: profiles.informative[$0]) }
         }
-        let first = hashes(one)
-        return (first, hashes(other))
+        return (hashes(first, one), hashes(second, other))
     }
 }
 
 extension PixelFrame {
-    /// Noise-tolerant line summaries along `axis` (see `LineProfiles`).
-    func lineProfiles(along axis: ScrollAxis) -> LineProfiles {
+    /// Noise-tolerant line summaries along `axis` (see `LineProfiles`), leaving out the last
+    /// `trailingMargin` pixels of each line: where an overlay scroll bar is drawn (#126). The
+    /// knob stays put on screen while the content moves under it, and it creeps a little every
+    /// step, so with it in, no line matches its moved copy.
+    func lineProfiles(along axis: ScrollAxis, trailingMargin: Int = 0) -> LineProfiles {
         let count = length(along: axis)
-        let breadth = breadth(along: axis)
+        let full = breadth(along: axis)
+        let breadth = trailingMargin > 0 && full > 4 * trailingMargin ? full - trailingMargin : full
         let stride = max(1, breadth / LineProfiles.maxSamples)
         let samples = (breadth + stride - 1) / stride
         let bins = max(1, min(LineProfiles.maxBins, samples))
