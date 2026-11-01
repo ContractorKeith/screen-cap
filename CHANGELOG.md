@@ -9,6 +9,8 @@ and versions follow [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+- Build the app before release tests so bundle security regressions run in tag builds.
+
 - Reject ad-hoc app signatures whose designated requirement permits anything other than cdhash terms.
 - Reject malformed project dimensions and geometry with a readable error; guard render sizing against numeric conversion crashes (#151).
 - Fixed crop snapping to detected window and panel edges while still discarding detection results after an edit (#154).
