@@ -9,6 +9,8 @@ and versions follow [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+- Reject malformed project dimensions and geometry with a readable error; guard render sizing against numeric conversion crashes (#151).
+
 ## [0.1.0] - Unreleased
 
 First release, not yet tagged. Ad-hoc signed, not notarized.

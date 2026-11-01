@@ -6,6 +6,7 @@ extension ProjectFileError: LocalizedError {
         switch self {
         case let .unsupportedSchemaVersion(found, supported):
             "The file uses format version \(found); this version of ScreenCap reads up to \(supported)."
+        case let .invalidGeometry(field): "This project’s \(field) is invalid."
         case let .missingFile(name): "\(name) is missing."
         case let .invalidLayerName(name): "“\(name)” isn't a valid layer name."
         case let .missingLayer(name): "The layer “\(name)” has no image."

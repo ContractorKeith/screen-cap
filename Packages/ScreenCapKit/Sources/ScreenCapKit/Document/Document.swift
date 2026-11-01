@@ -48,10 +48,25 @@ public struct Document: Sendable, Equatable, Codable {
             throw ProjectFileError.unsupportedSchemaVersion(found: version, supported: Self.currentSchemaVersion)
         }
         schemaVersion = version
-        baseImage = try container.decode(BaseImage.self, forKey: .baseImage)
-        canvasSize = try container.decode(CGSize.self, forKey: .canvasSize)
-        background = try container.decodeIfPresent(Background.self, forKey: .background)
-        annotations = try container.decode([Annotation].self, forKey: .annotations)
+        baseImage = try Self.decodeGeometry(BaseImage.self, from: container, key: .baseImage,
+                                            field: "base image size or scale")
+        canvasSize = try Self.decodeGeometry(CGSize.self, from: container, key: .canvasSize, field: "canvas size")
+        background = container.contains(.background)
+            ? try Self.decodeGeometry(Background?.self, from: container, key: .background,
+                                      field: "background geometry") : nil
+        annotations = try Self.decodeGeometry([Annotation].self, from: container, key: .annotations,
+                                              field: "annotation geometry")
+        try validateGeometry()
+    }
+
+    private static func decodeGeometry<T: Decodable>(
+        _ type: T.Type, from container: KeyedDecodingContainer<CodingKeys>, key: CodingKeys, field: String
+    ) throws -> T {
+        do {
+            return try container.decode(T.self, forKey: key)
+        } catch {
+            throw ProjectFileError.invalidGeometry(field)
+        }
     }
 }
 
