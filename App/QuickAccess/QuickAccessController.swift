@@ -10,6 +10,7 @@ final class QuickAccessController: CaptureSink {
     let settings: AppSettings
     let output: CaptureOutput
     let history: HistoryStore?
+    var askDelete: @MainActor () -> Bool
     /// For handing captures to the editor and pin features once they're installed.
     weak var router: CaptureSinkRouter?
     /// Newest first.
@@ -24,7 +25,8 @@ final class QuickAccessController: CaptureSink {
     private var badge: QuickAccessBadge?
 
     init(settings: AppSettings, output: CaptureOutput, history: HistoryStore?, router: CaptureSinkRouter?,
-         temp: TempFiles? = nil) {
+         temp: TempFiles? = nil, askDelete: @escaping @MainActor () -> Bool = QuickAccessDeletePrompt.ask) {
+        self.askDelete = askDelete
         self.settings = settings
         self.output = output
         self.history = history

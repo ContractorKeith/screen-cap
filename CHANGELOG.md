@@ -9,6 +9,8 @@ and versions follow [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+- Quick Access asks before deleting unsaved captures with Delete, forward Delete, or the toolbar; ⌘⌫ still skips confirmation (#150, #158).
+
 ## [0.1.0] - Unreleased
 
 First release, not yet tagged. Ad-hoc signed, not notarized.
