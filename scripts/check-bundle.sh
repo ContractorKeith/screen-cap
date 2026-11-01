@@ -39,5 +39,14 @@ for name in $(printf '%s\n' "${expected[@]}" | sort -u); do
   [[ -f "$APP/Contents/Resources/$name/Info.plist" ]] || {
     echo "Resource bundle $name missing from Contents/Resources" >&2; fail=1; }
 done
+# #142: a read-only file makes `xattr -d com.apple.quarantine` fail on it.
+readonly_files="$(find "$APP" ! -type l ! -perm -u+w)"
+if [[ -n "$readonly_files" ]]; then
+  echo "Files not user-writable (bundle.sh must chmod -R u+w):" >&2; echo "$readonly_files" >&2; fail=1
+fi
+# #141: an ad-hoc cdhash requirement changes every build and loses the Screen Recording grant.
+if codesign -dr - "$APP" 2>&1 | grep -q 'designated => cdhash'; then
+  echo "Designated requirement is a cdhash; bundle.sh must pin it to the bundle identifier" >&2; fail=1
+fi
 (( fail == 0 )) || exit 1
 echo "Bundle OK: $SHORT ($BUILD)"

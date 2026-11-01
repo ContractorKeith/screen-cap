@@ -55,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingURLs.map { $0.forEach(urlRouter.open) }
         pendingURLs = nil
         appLog.notice("ScreenCap launched, status item visible: \(self.menuBar?.isVisible ?? false)")
+        PermissionRegrant.record(granted: ScreenRecordingPermission.isGranted) // spots the next update (#141)
 
         if launch.requestsCapture {
             coordinator.runLaunchCapture(launch)

@@ -54,6 +54,12 @@ First release, not yet tagged. Ad-hoc signed, not notarized.
 - Opening a `.screencap` project or an image from Finder or `open -a` opens it in the editor (#96).
 - Quitting with unsaved editor work asks to save each window first (#84, #106).
 - Lowering "Keep captures for" asks before deleting older captures (#107).
+- Keyboard control of Quick Access: ⌃⇧Q focuses the newest panel; ⌘C, ⌘S, ⌘E or Return, ⌘P,
+  ⌘T, ⌘R, ⌫ and Esc act on it; Tab and the arrows move between panels (#129).
+- Keyboard control of History: arrows move (⇧ extends), Return opens, Space previews, ⌘C copies,
+  ⌘A selects all, ⌫ deletes (#130).
+- The welcome window spots an update that lost Screen Recording and gives the `tccutil reset`
+  command to copy, then waits for the new grant (#141).
 
 ### Fixed
 
@@ -67,12 +73,17 @@ Found in the pre-release QA passes.
 - Fixed sizes reject `inf`, `nan` and absurd values; the magnifier shows live pixels when the
   screen isn't frozen (#94).
 - Capture Text writes its History record again (#83).
+- An invalid `--region` fails with an exit code instead of opening the overlay and hanging `--quit` (#119).
+- The selection overlay follows display changes, so no part of the screen is out of reach (#131).
 
 #### Scrolling capture
 - Fast scrolls and repeating content (logs, tables, Terminal) stitch correctly; real gaps are
   marked with a seam and a HUD instead of duplicated rows (#69, #93, #108).
 - Auto-scroll keeps the top of the region and no longer stops early on repetitive pages (#108).
 - `--region` rejects `nan`, `inf`, hex and exponents (#105).
+- Auto-scroll on repeating output is period-aware: no repeated blocks or silently dropped rows,
+  and it runs to the end (#112, #126).
+- A display change mid-capture stops scrolling capture cleanly, so `--quit` exits (#127).
 
 #### Quick Access and History
 - Restore to Quick Access works, and OCR text reaches History (#66).
@@ -80,6 +91,10 @@ Found in the pre-release QA passes.
 - Drag-out uses the same output scale as Save; a cancelled swipe no longer moves the panel (#95).
 - Panels still on screen at quit come back with Restore Recently Closed (#107).
 - Delete reports a file that couldn't be moved to the Trash (#105).
+- History write failures are reported instead of losing closed captures silently (#113).
+- Temporary drag, copy and share files are cleaned up (#114).
+- Quick Access panels stay on screen instead of stacking past the display edge (#116).
+- History thumbnails of tall scrolling captures are readable, not a sliver (#133).
 
 #### Annotate
 - Redactions defeat OCR, Smooth blur is labeled as not for secrets, and saved projects bake
@@ -88,22 +103,35 @@ Found in the pre-release QA passes.
 - Auto Balance survives later edits; resize keeps the image scale; counter handles resize;
   undo memory is capped (#64).
 - A file that can't be opened shows a HUD instead of a modal that could hide behind other windows (#105).
+- Resize has sane limits, closed editor windows free their memory, and opaque images no longer
+  show a checkerboard strip at the edges (#110, #111, #118).
 
 #### URL scheme and settings
 - `open-settings` knows every tab; `scrolling-capture` and `capture-text` handle all their
   parameters and queue behind a running capture (#67, #83, #107).
 - Region numbers must be plain decimals (#107).
-- Reset All Settings resets every setting (#67).
-- Settings uses a sidebar so every pane title shows in full (#104).
+- Reset All Settings resets every setting (#67) and keeps History captures and their retention (#125).
+- Settings uses a sidebar so every pane title shows in full (#104) and opens fully on screen,
+  even on a 13" display (#115).
+
+#### Accessibility
+- VoiceOver reads tool names, sliders, swatches, popups, History thumbnails, the Resize fields
+  and "Keep captures for" instead of SF Symbol names or nothing (#117, #132).
 
 #### Build
 - Every build gets a real build number, and CI checks the bundle (#82).
 - The app ships its dependencies' resource bundles, so the Shortcuts pane works on any Mac (#96).
+- Ad-hoc builds sign with a fixed identifier, entitlements file and designated requirement
+  instead of a per-build cdhash (#141).
+- Every file in the bundle is user-writable, so `xattr -d com.apple.quarantine` succeeds (#142).
+- `make test` no longer leaves test preference files in `~/Library/Preferences` (#120).
 
 ### Documentation
 - Install steps for macOS 15 and later, which removed right-click → Open for unnotarized apps:
-  Privacy & Security → Open Anyway, or `xattr -dr com.apple.quarantine`. The DMG and the
-  welcome window carry the same note (#128).
+  Privacy & Security → Open Anyway, or `xattr -d com.apple.quarantine`. The DMG and the
+  welcome window carry the same note (#128, #142).
+- README: ⌃⇧Q and the Quick Access and History keys, the welcome window as it really is, and
+  how to re-grant Screen Recording after an update (#141, #143).
 
 [Unreleased]: https://github.com/ContractorKeith/screen-cap/commits/main
 [0.1.0]: https://github.com/ContractorKeith/screen-cap/commits/main

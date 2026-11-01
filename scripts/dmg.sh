@@ -32,11 +32,15 @@ macOS 15 and later:
   1. Drag ScreenCap to Applications and open it once. Click Done on the "Not Opened" dialog.
   2. System Settings > Privacy & Security, scroll to "ScreenCap was blocked", click Open Anyway.
   3. Authenticate, then open ScreenCap again.
-  Or in Terminal: xattr -dr com.apple.quarantine /Applications/ScreenCap.app
+  Or in Terminal: xattr -d com.apple.quarantine /Applications/ScreenCap.app
 
 macOS 14: right-click ScreenCap.app > Open > Open.
 
 After that it opens normally. Each new version you download needs this once.
+
+Updating? If ScreenCap asks for Screen Recording although its toggle is already on, run
+  tccutil reset ScreenCapture com.contractorkeith.screencap
+in Terminal, then turn ScreenCap on again in System Settings.
 TXT
 
 mkdir -p dist
