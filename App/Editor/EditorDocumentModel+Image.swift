@@ -8,21 +8,22 @@ extension EditorDocumentModel {
     // MARK: - Crop
 
     /// Starts crop mode with the whole image selected and detects UI edges to snap to.
-    func beginCrop() {
+    @discardableResult
+    func beginCrop() -> Task<Void, Never> {
         tool = .crop
         selection = []
         cropRect = CGRect(origin: .zero, size: snapshot.imageSize)
         cropEdges = CropEdges()
+        touch()
         let image = baseImage
         let revisionAtStart = revision
-        Task.detached(priority: .userInitiated) {
+        return Task.detached(priority: .userInitiated) {
             let edges = CropEdgeDetector.edges(in: image)
             await MainActor.run { [weak self] in
                 guard let self, self.revision == revisionAtStart else { return }
                 self.cropEdges = edges
             }
         }
-        touch()
     }
 
     var cropRatio: Double? { cropAspect.ratio(custom: customAspect) }
