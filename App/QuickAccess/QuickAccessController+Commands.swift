@@ -62,7 +62,7 @@ extension QuickAccessController {
         case .ocr: requestText(item)
         case .reveal: Task { await reveal(item) }
         case .close: Task { await close(item); focusAfterRemoving(item, at: refocus) }
-        case .delete: Task { await delete(item); focusAfterRemoving(item, at: refocus) }
+        case .delete: requestDelete(item, confirmed: false, refocus: refocus)
         }
     }
 
@@ -200,7 +200,7 @@ extension QuickAccessController {
         if step == .confirm {
             // Keep the panel from auto-closing behind the alert.
             item.timer.pause(at: Date())
-            let delete = QuickAccessDeletePrompt.ask()
+            let delete = askDelete()
             if !item.isHovered, !QuickAccessVisibility.isHidden { item.timer.resume(at: Date()) }
             guard delete else {
                 if refocus != nil, items.contains(where: { $0 === item }) { item.panel.focusForKeyboard() }
